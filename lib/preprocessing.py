@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.core.fromnumeric import std
 from numpy.matlib import repmat
 import warnings
 
@@ -43,9 +44,58 @@ def _predict_missing_markers(data_gaps, **kwargs):
             The marker position data with N time steps across M channels.
         ix_channels_with_gaps : array_lik
             The indexes of the channels with missing marker data.
+        
+        Returns
+        -------
+        weights : (M'', M') array_like
+            Array of pair-wise Euclidean distances between markers with gaps and each other marker.
+            Here, M'' is the number of markers with missing data, and M' is the number of markers.
+        """
+        from scipy.spatial.distance import cdist
+
+        # Get shape of data
+        N, M = data.shape
+        
+        # Reshape data to shape (3, n_markers, n_time_steps)
+        ix_markers_with_gaps = ( ix_channels_with_gaps[2::3] // 3 )  # columns of markers with gaps
+        n_markers_with_gaps = len(ix_markers_with_gaps)
+        data_reshaped = (data.T).reshape((3, M//3, N), order="F")
+
+        # Compute weights based on distances
+        weights = np.empty((n_markers_with_gaps, M//3, N))
+        for i in range(N):
+            weights[:,:,i] = cdist(data_reshaped[:,ix_markers_with_gaps,i].T, data_reshaped[:,:,i].T, "euclidean")
+        weights = np.nanmean(weights, axis=-1)
+        return weights
+    
+    def _PCA(data):
+        """Performs principal components analysis by means of singular value decomposition.
+
+        Parameters
+        ----------
+        data : (N, M) array_like
+            The marker position data with N time steps across M channels.
+        
+        Returns
+        -------
+        PC : 
+            The principal component vectors.
+        sqrtEV : 
+            The square root of the eigenvalues.
         """
 
-    def _reconstruct(data, **kwargs):
+        # Get shape of data
+        N, M = data.shape
+
+        # Calculate Y matrix
+        Y = data / np.sqrt(N-1)
+
+        # Find principal components
+        _, sqrtEV, VT = np.linalg.svd(Y, full_matrices=0)
+        PC = VT.T
+        return PC, sqrtEV
+
+    def _reconstruct(data, weight_scale, mm_weight, min_cum_sv):
         """Reconstructs missing marker data using the strategy based on intercorrelations between marker clusters.
 
         Parameters
@@ -62,14 +112,71 @@ def _predict_missing_markers(data_gaps, **kwargs):
         """
 
         # Get shape of data
-        N, M = data.shape
+        n_time_steps, n_channels = data.shape
+        n_markers = n_channels // 3
 
         # Find channels with missing data
         ix_channels_with_gaps, = np.nonzero(np.any(np.isnan(data), axis=0))
+        ix_time_steps_with_gaps, = np.nonzero(np.any(np.isnan(data), axis=1))
 
         # Compute the weights
         weights = _distance2marker(data, ix_channels_with_gaps)
-        return weights
+        if weights.shape[0] > 1:
+            weights = np.min(weights, axis=0)
+        weights = np.exp(-np.divide(weights**2, 2*weight_scale**2))
+        weights[ix_channels_with_gaps[2::3]//3] = mm_weight
+
+        # Define matrices need for reconstruction
+        M_zeros = data.copy()
+        M_zeros[:,ix_channels_with_gaps] = 0
+        N_no_gaps = np.delete(data, ix_time_steps_with_gaps, axis=0)
+        N_zeros = N_no_gaps.copy()
+        N_zeros[:,ix_channels_with_gaps] = 0
+
+        # Normalize matrices to unit variance, then multiply by weights
+        mean_N_no_gaps = np.mean(N_no_gaps, axis=0)
+        mean_N_zeros = np.mean(N_zeros, axis=0)
+        stdev_N_no_gaps = np.std(N_no_gaps, axis=0)
+        stdev_N_no_gaps[np.argwhere(stdev_N_no_gaps==0)[:,0]] = 1
+
+        M_zeros = np.divide(( M_zeros - np.tile(mean_N_zeros.reshape(-1,1).T, (M_zeros.shape[0], 1)) ), \
+            np.tile(stdev_N_no_gaps.reshape(-1,1).T, (M_zeros.shape[0],1))) * \
+                np.tile(np.tile(weights, (3,1)).reshape(n_channels, order="F").reshape(-1,1).T, (M_zeros.shape[0],1))
+        
+        N_no_gaps = np.divide(( N_no_gaps - np.tile(mean_N_no_gaps.reshape(-1,1).T, (N_no_gaps.shape[0],1)) ), \
+            np.tile(stdev_N_no_gaps.reshape(-1,1).T, (N_no_gaps.shape[0],1))) * \
+                np.tile(np.tile(weights, (3,1)).reshape(n_channels, order="F").reshape(-1,1).T, (N_no_gaps.shape[0],1))
+        
+        N_zeros = np.divide(( N_zeros - np.tile(mean_N_zeros.reshape(-1,1).T, (N_zeros.shape[0],1)) ), \
+            np.tile(stdev_N_no_gaps.reshape(-1,1).T, (N_zeros.shape[0],1))) * \
+                np.tile(np.tile(weights, (3,1)).reshape(n_channels, order="F").reshape(-1,1).T, (N_zeros.shape[0],1))
+        
+        # Calculate the principal component vectors and the eigenvalues
+        PC_vectors_no_gaps, sqrtEV_no_gaps = _PCA(N_no_gaps)
+        PC_vectors_zeros, sqrtEV_zeros = _PCA(N_zeros)
+
+        # Determine the number of eigenvectors to consider
+        n_eigvecs = np.max([np.argwhere(np.cumsum(sqrtEV_no_gaps) >= min_cum_sv*np.sum(sqrtEV_no_gaps))[:,0][0], \
+            np.argwhere(np.cumsum(sqrtEV_zeros) >= min_cum_sv*np.sum(sqrtEV_zeros))[:,0][0]])
+        PC_vectors_no_gaps = PC_vectors_no_gaps[:,:n_eigvecs+1]
+        PC_vectors_zeros = PC_vectors_zeros[:,:n_eigvecs+1]
+
+        # Calculate the transformation matrix
+        T = PC_vectors_no_gaps.T @ PC_vectors_zeros
+
+        # Calculate the reconstruction matrix, see: Federolf (2013).
+        R = M_zeros @ PC_vectors_zeros @ T @ PC_vectors_no_gaps.T
+
+        # Reverse the normalization
+        R = np.tile(mean_N_no_gaps.reshape(-1,1).T, (data.shape[0],1)) + \
+            np.divide(R * np.tile(stdev_N_no_gaps.reshape(-1,1).T, (data.shape[0],1)), \
+                np.tile(np.tile(weights, (3,1)).reshape(n_channels, order="F").reshape(-1,1).T, (data.shape[0],1)))
+        
+        # Replace missing data with reconstructed data
+        reconstructed_data = data.copy()
+        for ix in ix_channels_with_gaps:
+            reconstructed_data[:,ix] = R[:,ix]
+        return reconstructed_data
 
     # Parse optional arguments, or get defaults
     method = kwargs.get("method", "R2")
@@ -90,7 +197,7 @@ def _predict_missing_markers(data_gaps, **kwargs):
     
     # If no gaps were found
     if len(ix_time_steps_with_gaps) == 0:
-        warnings.warn("Submitted data appear to have no gaps. Make sure that gaps missing data is represented by NaNs.")
+        warnings.warn("Submitted data appear to have no gaps. Make sure that gaps are represented by NaNs.")
         return data_gaps
     
     # Subtract mean marker trajectory to get a coordinate system moving with the subject
@@ -101,13 +208,30 @@ def _predict_missing_markers(data_gaps, **kwargs):
     del T
 
     B = data_gaps.copy()
-    B[:, ::3] = B[:, ::3] - np.tile(mean_trajectory_x.reshape(-1,1), (1, n_markers))
-    B[:, 1::3] = B[:, 1::3] - np.tile(mean_trajectory_y.reshape(-1,1), (1, n_markers))
-    B[:, 2::3] = B[:, 2::3] - np.tile(mean_trajectory_z.reshape(-1,1), (1, n_markers))
+    B[:,::3] = B[:,::3] - np.tile(mean_trajectory_x.reshape(-1,1), (1, n_markers))
+    B[:,1::3] = B[:,1::3] - np.tile(mean_trajectory_y.reshape(-1,1), (1, n_markers))
+    B[:,2::3] = B[:,2::3] - np.tile(mean_trajectory_z.reshape(-1,1), (1, n_markers))
 
     # Reconstruct missing marker data
     if method == "R1":
-        reconstructed_data = _reconstruct(B)
+        reconstructed_data = _reconstruct(B, weight_scale=weight_scale, mm_weight=mm_weight, min_cum_sv=min_cum_sv)
 
-    
-    return reconstructed_data
+        # Replace the missing data with reconstructed data
+        filled_data = np.where(np.isnan(data_gaps), reconstructed_data, B)
+    elif method == "R2":
+        # Get markers with gaps
+        ix_markers_with_gaps = ix_channels_with_gaps[2::3] // 3
+        for ix in ix_markers_with_gaps[:1]:
+            eucl_distance_2_markers = _distance2marker(data_gaps, np.arange(ix*3,(ix+1)*3))
+            thresh = distal_threshold * np.mean(eucl_distance_2_markers)
+            ix_cols_2_zero = np.argwhere(np.logical_and(np.reshape(np.tile(eucl_distance_2_markers, (3,1)), (1,111), order="F").reshape(-1,) > thresh, \
+                np.any(np.isnan(data_gaps), axis=0)))[:,0]
+    else:
+        warnings.warn("Invalid reconstruction method, please specify `R1` or `R2`. Returning original data.")
+        return data_gaps
+
+    # Add the mean marker trajectory
+    # filled_data[:,::3] = filled_data[:,::3] + np.tile(mean_trajectory_x.reshape(-1,1), (1,n_markers))
+    # filled_data[:,1::3] = filled_data[:,1::3] + np.tile(mean_trajectory_y.reshape(-1,1), (1,n_markers))
+    # filled_data[:,2::3] = filled_data[:,2::3] + np.tile(mean_trajectory_z.reshape(-1,1), (1,n_markers))
+    return ix_cols_2_zero #filled_data
