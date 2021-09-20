@@ -219,19 +219,57 @@ def _predict_missing_markers(data_gaps, **kwargs):
         # Replace the missing data with reconstructed data
         filled_data = np.where(np.isnan(data_gaps), reconstructed_data, B)
     elif method == "R2":
+        # Allocate space for reconstructed data matrix
+        reconstructed_data = B.copy()
+
         # Get markers with gaps
         ix_markers_with_gaps = ix_channels_with_gaps[2::3] // 3
         for ix in ix_markers_with_gaps[:1]:
-            eucl_distance_2_markers = _distance2marker(data_gaps, np.arange(ix*3,(ix+1)*3))
+            eucl_distance_2_markers = _distance2marker(B, np.arange(ix*3,(ix+1)*3))
             thresh = distal_threshold * np.mean(eucl_distance_2_markers)
-            ix_cols_2_zero = np.argwhere(np.logical_and(np.reshape(np.tile(eucl_distance_2_markers, (3,1)), (1,111), order="F").reshape(-1,) > thresh, \
-                np.any(np.isnan(data_gaps), axis=0)))[:,0]
+            ix_channels_2_zero = np.argwhere(np.logical_and(np.reshape(np.tile(eucl_distance_2_markers, (3,1)), (1,111), order="F").reshape(-1,) > thresh, \
+                np.any(np.isnan(B), axis=0)))[:,0]
+            
+            # Set channels to 0, for which there are NaNs and that are far away from the current marker
+            data_gaps_removed_cols = B.copy()
+            data_gaps_removed_cols[:,ix_channels_2_zero] = 0
+            data_gaps_removed_cols[:,ix*3:(ix+1)*3] = B[:,ix*3:(ix+1)*3]
+
+            # Find gaps in marker trajectory
+            ix_frames_with_gaps, = np.nonzero(np.isnan(B[:, ix]))
+            
+            # For channels that have gaps in the same time span, set values to 0
+            for jx in np.setdiff1d(ix_markers_with_gaps, ix):
+                if np.any(np.isnan(data_gaps_removed_cols[ix_frames_with_gaps,3*jx])):
+                    data_gaps_removed_cols[:,3*jx:3*jx+3] = 0
+            
+            # Find frames without gaps in marker trajectory
+            ix_frames_no_gaps, = np.nonzero(np.logical_not(np.any(np.isnan(data_gaps_removed_cols), axis=1)))
+
+            # Find frames with gaps in marker trajectory `ix`
+            ix_frames_2_reconstruct, = np.nonzero(np.any(np.isnan(data_gaps_removed_cols[:,3*ix:3*ix+3]), axis=1))
+
+            # Concatenate frames to reconstruct, at the end frames without gaps
+            ix_complete_and_gapped_frames = np.concatenate((ix_frames_no_gaps, ix_frames_2_reconstruct))
+
+            # Get indexes of frames to fill
+            ix_fill_frames = np.arange(len(ix_frames_no_gaps), len(ix_complete_and_gapped_frames))
+
+            # Store temporarily reconstruct data
+            temp_reconstructed_data = _reconstruct(data_gaps_removed_cols[ix_complete_and_gapped_frames,:], weight_scale=weight_scale, mm_weight=mm_weight, min_cum_sv=min_cum_sv)
+
+            # Replace gapped data with reconstructed data
+            reconstructed_data[ix_frames_2_reconstruct, 3*ix:3*ix+3] = temp_reconstructed_data[ix_fill_frames, 3*ix:3*ix+3]
+        
+        # Assign to output variable
+        filled_data = reconstructed_data.copy()
+
     else:
         warnings.warn("Invalid reconstruction method, please specify `R1` or `R2`. Returning original data.")
         return data_gaps
 
     # Add the mean marker trajectory
-    # filled_data[:,::3] = filled_data[:,::3] + np.tile(mean_trajectory_x.reshape(-1,1), (1,n_markers))
-    # filled_data[:,1::3] = filled_data[:,1::3] + np.tile(mean_trajectory_y.reshape(-1,1), (1,n_markers))
-    # filled_data[:,2::3] = filled_data[:,2::3] + np.tile(mean_trajectory_z.reshape(-1,1), (1,n_markers))
-    return ix_cols_2_zero #filled_data
+    filled_data[:,::3] = filled_data[:,::3] + np.tile(mean_trajectory_x.reshape(-1,1), (1,n_markers))
+    filled_data[:,1::3] = filled_data[:,1::3] + np.tile(mean_trajectory_y.reshape(-1,1), (1,n_markers))
+    filled_data[:,2::3] = filled_data[:,2::3] + np.tile(mean_trajectory_z.reshape(-1,1), (1,n_markers))
+    return filled_data
