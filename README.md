@@ -6,3 +6,8 @@ At the Neurology department of the University Hospital Kiel (UKSH) we are workin
 2. wearable inertial measurement unit (IMU) systems, usually containing a 3-axis accelerometer and 3-axis gyroscope.  
 
 In-lab recordings are used to validate IMU-based algorithms where reference values are obtained from the OMC systems. In the long run, the IMU-based algorithms are to be used in the home environment to gain insight in real-world gait.
+
+#### To Dos:
+- run tests on the datasets to fill gaps in marker data
+- implement gait event detection algorithm by O'Connor *et al*. (2007)
+- implement gait event detection algorithm by Salarian *et al*. (2006)
