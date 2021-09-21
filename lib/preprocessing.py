@@ -8,7 +8,8 @@ def _predict_missing_markers(data_gaps, **kwargs):
     """Fills gaps in the marker postion data exploiting intercorrelations between marker coordinates.
 
     See:
-
+        Federolf PA (2013), PLoS ONE 8(10):e78689. doi:10.1371/journal.pone.0078689
+        Gløersen Ø, Federolf P (2016), PLoS ONE 11(3):e0152616. doi:10.1371/journal.pone.0152616
 
     Parameters
     ----------
@@ -20,15 +21,18 @@ def _predict_missing_markers(data_gaps, **kwargs):
         x1(t2) y1(t2) z1(t2) x2(t2) y2(t2) z2(t2) ...    xm(t2) ym(t2) zm(t2)
         ...    ...    ...    ...    ...    ...    ...    ...    ...    ...
         x1(tn) y1(tn) z1(tn) x2(tn) y2(tn) z2(tn) ...    xm(tn) ym(tn) zm(tn)
+
+        Thus, the first three columns correspond to the x-, y-, and-z coordinate of the 1st marker.
+        The rows correspond to the consecutive time steps (i.e., frames).
     
     Optional parameters
     -------------------
         method : str
-            Reconstruction strategy for gaps in multiple markers (`R1` or `R2`).
+            Reconstruction strategy for gaps in multiple markers (`R1` or `R2` (default)).
         weight_scale : float
             Parameter `sigma` for determining weights. Default is 200.
         mm_weight : float
-            Parapmeter for weight on missing markers. Default is 0.02.
+            Parameter for weight on missing markers. Default is 0.02.
         distal_threshold : float
             Cut-off distance for distal marker in `R2` relative to average Euclidean distances. Default is 0.5.
         min_cum_sv : float
@@ -107,13 +111,12 @@ def _predict_missing_markers(data_gaps, **kwargs):
 
         Returns
         -------
-        [type]
-            [description]
+        reconstructed_data : (N, M) array_like
+            The data with reconstructed marker trajectories.
         """
 
         # Get shape of data
         n_time_steps, n_channels = data.shape
-        n_markers = n_channels // 3
 
         # Find channels with missing data
         ix_channels_with_gaps, = np.nonzero(np.any(np.isnan(data), axis=0))
@@ -121,8 +124,9 @@ def _predict_missing_markers(data_gaps, **kwargs):
 
         # Compute the weights
         weights = _distance2marker(data, ix_channels_with_gaps)
-        if weights.shape[0] > 1:
+        if weights.shape[0] >= 1:
             weights = np.min(weights, axis=0)
+        print(f"Shape of weights vector: {weights.shape}")
         weights = np.exp(-np.divide(weights**2, 2*weight_scale**2))
         weights[ix_channels_with_gaps[2::3]//3] = mm_weight
 
@@ -150,7 +154,7 @@ def _predict_missing_markers(data_gaps, **kwargs):
         N_zeros = np.divide(( N_zeros - np.tile(mean_N_zeros.reshape(-1,1).T, (N_zeros.shape[0],1)) ), \
             np.tile(stdev_N_no_gaps.reshape(-1,1).T, (N_zeros.shape[0],1))) * \
                 np.tile(np.tile(weights, (3,1)).reshape(n_channels, order="F").reshape(-1,1).T, (N_zeros.shape[0],1))
-        
+
         # Calculate the principal component vectors and the eigenvalues
         PC_vectors_no_gaps, sqrtEV_no_gaps = _PCA(N_no_gaps)
         PC_vectors_zeros, sqrtEV_zeros = _PCA(N_zeros)
@@ -191,7 +195,7 @@ def _predict_missing_markers(data_gaps, **kwargs):
 
     # Find channels with gaps
     ix_channels_with_gaps, = np.nonzero(np.any(np.isnan(data_gaps), axis=0))
-    
+        
     # Find time steps with gaps
     ix_time_steps_with_gaps, = np.nonzero(np.any(np.isnan(data_gaps), axis=1))
     
@@ -199,6 +203,10 @@ def _predict_missing_markers(data_gaps, **kwargs):
     if len(ix_time_steps_with_gaps) == 0:
         warnings.warn("Submitted data appear to have no gaps. Make sure that gaps are represented by NaNs.")
         return data_gaps
+    elif len(ix_time_steps_with_gaps) == n_time_steps:
+        if method == "R1":
+            warnings.warn("For each time step there is at least one marker with missing data. Cannot perform reconstruction according to strategy R1.")
+            return data_gaps
     
     # Subtract mean marker trajectory to get a coordinate system moving with the subject
     T = np.delete(data_gaps, ix_channels_with_gaps, axis=1)
