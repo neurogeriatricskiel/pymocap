@@ -126,7 +126,6 @@ def _predict_missing_markers(data_gaps, **kwargs):
         weights = _distance2marker(data, ix_channels_with_gaps)
         if weights.shape[0] >= 1:
             weights = np.min(weights, axis=0)
-        print(f"Shape of weights vector: {weights.shape}")
         weights = np.exp(-np.divide(weights**2, 2*weight_scale**2))
         weights[ix_channels_with_gaps[2::3]//3] = mm_weight
 
@@ -206,7 +205,7 @@ def _predict_missing_markers(data_gaps, **kwargs):
     elif len(ix_time_steps_with_gaps) == n_time_steps:
         if method == "R1":
             warnings.warn("For each time step there is at least one marker with missing data. Cannot perform reconstruction according to strategy R1.")
-            return data_gaps
+            return None
     
     # Subtract mean marker trajectory to get a coordinate system moving with the subject
     T = np.delete(data_gaps, ix_channels_with_gaps, axis=1)
@@ -232,7 +231,7 @@ def _predict_missing_markers(data_gaps, **kwargs):
 
         # Get markers with gaps
         ix_markers_with_gaps = ix_channels_with_gaps[2::3] // 3
-        for ix in ix_markers_with_gaps[:1]:
+        for ix in ix_markers_with_gaps:
             eucl_distance_2_markers = _distance2marker(B, np.arange(ix*3,(ix+1)*3))
             thresh = distal_threshold * np.mean(eucl_distance_2_markers)
             ix_channels_2_zero = np.argwhere(np.logical_and(np.reshape(np.tile(eucl_distance_2_markers, (3,1)), (1,111), order="F").reshape(-1,) > thresh, \
