@@ -234,7 +234,7 @@ def _predict_missing_markers(data_gaps, **kwargs):
         for ix in ix_markers_with_gaps:
             eucl_distance_2_markers = _distance2marker(B, np.arange(ix*3,(ix+1)*3))
             thresh = distal_threshold * np.mean(eucl_distance_2_markers)
-            ix_channels_2_zero = np.argwhere(np.logical_and(np.reshape(np.tile(eucl_distance_2_markers, (3,1)), (1,111), order="F").reshape(-1,) > thresh, \
+            ix_channels_2_zero = np.argwhere(np.logical_and(np.reshape(np.tile(eucl_distance_2_markers, (3,1)), (1,n_channels), order="F").reshape(-1,) > thresh, \
                 np.any(np.isnan(B), axis=0)))[:,0]
             
             # Set channels to 0, for which there are NaNs and that are far away from the current marker
@@ -280,3 +280,26 @@ def _predict_missing_markers(data_gaps, **kwargs):
     filled_data[:,1::3] = filled_data[:,1::3] + np.tile(mean_trajectory_y.reshape(-1,1), (1,n_markers))
     filled_data[:,2::3] = filled_data[:,2::3] + np.tile(mean_trajectory_z.reshape(-1,1), (1,n_markers))
     return filled_data
+
+def _butter_lowpass(data, fs, filter_order=4, cutoff_frequency=5.):
+    """Lowpass filters the data by applying a Butterworth filter in forward and backward direction.
+
+    Parameters
+    ----------
+    data : (N, M) array_like
+        The data with N time steps across M channels.
+    fs : int, float
+        The sampling frequency, in Hz.
+    filter_order : int, optional
+        The order of the filter, by default 4.
+    cutoff_frequency : int, float, optional
+        The cut-off frequency of the filter, in Hz, by default 5.
+    """
+    from scipy.signal import butter, filtfilt
+
+    # Get filter coefficients
+    b, a = butter(filter_order, cutoff_frequency/(fs/2), btype="low")
+
+    # Filter the data twice (see: https://dsp.stackexchange.com/questions/11466/differences-between-python-and-matlab-filtfilt-function)
+    filtered_data = filtfilt(b, a, data, axis=0, padtype="odd", padlen=3*(max(len(b),len(a))-1))
+    return filtered_data
