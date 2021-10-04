@@ -55,7 +55,44 @@ def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
 
             # Last local maximum corresponds to final contact
             ix_FC.append(ix_max_vel_z[f[-1]])
-    return mid_foot_pos, mid_foot_vel, ix_IC, ix_FC
+    return np.array(ix_IC), np.array(ix_FC)
+
+def _get_gait_events_Zeni(heel_pos, toe_pos, sacrum_pos, fs):
+    """Detect gait events from optical motion capture data according to Zeni Jr et al. (2008).
+
+    Parameters
+    ----------
+    heel_pos : (N, 3) array_like
+        The heel marker position data.
+    toe_pos : (N, 3) array_like
+        The toe marker position data.
+    sacrum_pos : (N, 3) array_like
+        The sacral marker position data.
+    fs : int, float
+        Sampling frequency (in Hz).
+    """
+
+    # Calculate marker position data relative to sacral markers
+    heel_pos_rel = heel_pos - sacrum_pos
+    toe_pos_rel = toe_pos - sacrum_pos
+
+    # Subtract the mean
+    heel_pos_rel = heel_pos_rel - np.mean(heel_pos_rel, axis=0)
+    toe_pos_rel = toe_pos_rel - np.mean(toe_pos_rel, axis=0)
+
+    # Set thresholds
+    range_x = np.max(heel_pos_rel[:,0]) - np.min(heel_pos_rel[:,0])
+    thr_min_height = 0.1 * range_x
+    thr_min_dist = np.round(0.250*fs)
+
+    # Find peaks in the heel marker relative position data
+    ix_IC, _ = find_peaks(heel_pos_rel[:,0], height=thr_min_height, distance=thr_min_dist)
+
+    # Find minima in the toe marker relative position data
+    range_x = np.max(toe_pos_rel[:,0]) - np.min(toe_pos_rel[:,0])
+    thr_min_height = 0.1 * range_x
+    ix_FC, _ = find_peaks(-toe_pos_rel[:,0], height=thr_min_height, distance=thr_min_dist)
+    return np.array(ix_IC), np.array(ix_FC)
 
 def _get_gait_events_from_OMC(data, fs, labels, method="OConnor"):
     """Detect gait events from optical motion capture (OMC) data according to the specified method.
@@ -75,11 +112,21 @@ def _get_gait_events_from_OMC(data, fs, labels, method="OConnor"):
     if method.upper() == "OCONNOR":
         l_heel_pos = data[:,:,np.argwhere(labels=='l_heel')[:,0][0]]
         l_toe_pos = data[:,:,np.argwhere(labels=='l_toe')[:,0][0]]
-        l_mid_foot_pos, l_mid_foot_vel, l_ix_IC, l_ix_FC = _get_gait_events_OConnor(l_heel_pos, l_toe_pos, fs)
+        l_ix_IC, l_ix_FC = _get_gait_events_OConnor(l_heel_pos, l_toe_pos, fs)
 
         r_heel_pos = data[:,:,np.argwhere(labels=='r_heel')[:,0][0]]
         r_toe_pos = data[:,:,np.argwhere(labels=='r_toe')[:,0][0]]
-        r_mid_foot_pos, r_mid_foot_vel, r_ix_IC, r_ix_FC = _get_gait_events_OConnor(r_heel_pos, r_toe_pos, fs)
+        r_ix_IC, r_ix_FC = _get_gait_events_OConnor(r_heel_pos, r_toe_pos, fs)
+    elif method.upper() == "ZENI":
+        l_heel_pos = data[:,:,np.argwhere(labels=='l_heel')[:,0][0]]
+        l_toe_pos = data[:,:,np.argwhere(labels=='l_toe')[:,0][0]]
+        l_psis_pos = data[:,:,np.argwhere(labels=='l_psis')[:,0][0]]
+        l_ix_IC, l_ix_FC = _get_gait_events_Zeni(l_heel_pos, l_toe_pos, l_psis_pos, fs)
+
+        r_heel_pos = data[:,:,np.argwhere(labels=='r_heel')[:,0][0]]
+        r_toe_pos = data[:,:,np.argwhere(labels=='r_toe')[:,0][0]]
+        r_psis_pos = data[:,:,np.argwhere(labels=='r_psis')[:,0][0]]
+        r_ix_IC, r_ix_FC = _get_gait_events_Zeni(r_heel_pos, r_toe_pos, r_psis_pos, fs)
     else:
         pass
-    return l_mid_foot_vel, r_mid_foot_vel, l_ix_IC, l_ix_FC, r_ix_IC, r_ix_FC
+    return l_ix_IC, l_ix_FC, r_ix_IC, r_ix_FC
