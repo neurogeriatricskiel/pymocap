@@ -43,7 +43,7 @@ def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
     for ix_pk in ix_max_vel_x:
 
         # Consider the negative peaks following the current (horizontal) peak
-        f = np.argwhere(ix_min_vel_z > ix_pk)[:,0]
+        f = np.argwhere(np.logical_and(ix_min_vel_z > ix_pk, ix_min_vel_z < ix_pk+np.round(0.250*fs)))[:,0]
         if len(f) > 0:
 
             # First local minimum corresponds to initial contact
