@@ -109,30 +109,6 @@ def _get_gait_events_from_OMC(data, fs, labels, method="OConnor"):
         The method used to detect the initial foot contacts and final contacts, by default "OConnor"
     """
 
-    # Get position data for relevant markers
-    l_heel_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_heel')[:,0]], axis=-1)
-    r_heel_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_heel')[:,0]], axis=-1)
-    l_toe_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_toe')[:,0]], axis=-1)
-    r_toe_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_toe')[:,0]], axis=-1)
-    l_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_psis')[:,0]], axis=-1)
-    r_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_psis')[:,0]], axis=-1)
-    l_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_asis')[:,0]], axis=-1)
-    r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
-
-    # Get position data for auxiliary markers
-    start_1 = np.squeeze(data[:,:,np.argwhere(labels=='start_1')[:,0]], axis=-1)
-    start_2 = np.squeeze(data[:,:,np.argwhere(labels=='start_2')[:,0]], axis=-1)
-    end_1 = np.squeeze(data[:,:,np.argwhere(labels=='end_1')[:,0]], axis=-1)
-    end_2 = np.squeeze(data[:,:,np.argwhere(labels=='end_2')[:,0]], axis=-1)
-
-    # Determine beginning and ending of the trial
-    mid_asis = ( l_asis + r_asis ) / 2
-    mid_psis = ( l_psis + r_psis ) / 2
-    mid_start = ( start_1 + start_2 ) / 2
-    mid_end = ( end_1 + end_2 ) / 2
-
-    
-
     if method.upper() == "OCONNOR":
         l_heel_pos = data[:,:,np.argwhere(labels=='l_heel')[:,0][0]]
         l_toe_pos = data[:,:,np.argwhere(labels=='l_toe')[:,0][0]]

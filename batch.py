@@ -18,7 +18,7 @@ def main():
     participant_ids = [folder_name for folder_name in os.listdir(PARENT_FOLDER) if folder_name.startswith("pp")]
 
     # Loop over the participants
-    for participant_id in participant_ids[5:6]:
+    for participant_id in participant_ids[4:5]:
         print(f"{participant_id}")
 
         # Get a list of optical motion capture files
