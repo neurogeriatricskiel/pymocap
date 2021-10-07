@@ -294,6 +294,11 @@ def _butter_lowpass(data, fs, filter_order=4, cutoff_frequency=5.):
         The order of the filter, by default 4.
     cutoff_frequency : int, float, optional
         The cut-off frequency of the filter, in Hz, by default 5.
+    
+    Returns
+    -------
+    filtered_data : (N, M) array_like
+        The data, but now low-pass filtered.
     """
     from scipy.signal import butter, filtfilt
 
@@ -303,3 +308,77 @@ def _butter_lowpass(data, fs, filter_order=4, cutoff_frequency=5.):
     # Filter the data twice (see: https://dsp.stackexchange.com/questions/11466/differences-between-python-and-matlab-filtfilt-function)
     filtered_data = filtfilt(b, a, data, axis=0, padtype="odd", padlen=3*(max(len(b),len(a))-1))
     return filtered_data
+
+def _align_trajectories_with_walking_direction(data, labels):
+    """Align the marker trajectories with the main direction of walking.
+
+    Parameters
+    ----------
+    data : (N, 3, M) array_like
+        The marker data with N time steps across 3 dimensions for M markers.
+    labels : (M,) array_like
+        An array of marker labels.
+    
+    Returns
+    -------
+    aligned_data : (N, 3, M) array_like
+        The marker data, but now rotated such that the X-component (roughly) aligns with the direction of walking.
+    """
+    # Get data dimensions
+    n_time_steps, n_dimensions, n_markers = data.shape
+
+    # Get the iliac spine markers
+    l_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_psis')[:,0]], axis=-1)
+    r_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_psis')[:,0]], axis=-1)
+    l_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_asis')[:,0]], axis=-1)
+    r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
+    pelvis_pos = ( l_asis_pos + l_psis_pos + r_asis_pos + r_psis_pos ) / 4
+
+    # Get position data for auxiliary markers
+    start_1 = np.squeeze(data[:,:,np.argwhere(labels=='start_1')[:,0]], axis=-1)
+    start_2 = np.squeeze(data[:,:,np.argwhere(labels=='start_2')[:,0]], axis=-1)
+    end_1 = np.squeeze(data[:,:,np.argwhere(labels=='end_1')[:,0]], axis=-1)
+    end_2 = np.squeeze(data[:,:,np.argwhere(labels=='end_2')[:,0]], axis=-1)
+    mid_start = ( start_1 + start_2 ) / 2
+    mid_end = ( end_1 + end_2 ) / 2
+
+    # Get the estimated start and end of the trial
+    distances = np.sqrt(np.sum(((pelvis_pos - mid_start)**2), axis=1))
+    ix_start = np.argmin(distances)
+    del distances
+
+    distances = np.sqrt(np.sum(((pelvis_pos - mid_end)**2), axis=1))
+    ix_end = np.argmin(distances)
+    del distances
+
+    # Estimate the walking direction
+    e_x = pelvis_pos[ix_end,:] - pelvis_pos[ix_start,:]
+    e_x = e_x / np.linalg.norm(e_x)
+
+    # Define the vertical direction
+    e_z = np.array([0.0, 0.0, 1.0])
+
+    # Calculate the vector perpendicular to the main walking direction
+    e_y = np.cross(e_z, e_x)
+    e_y = e_y / np.linalg.norm(e_y)
+
+    # Final estimate of the walking direction
+    e_x = np.cross(e_y, e_z)
+
+    # Construct the rotation matrix
+    R = np.array([e_x, e_y, e_z])
+
+    # From each marker trajectory subtract the initial position vector
+    data[:,:2,:] = data[:,:2,:] - np.expand_dims(np.tile(pelvis_pos[ix_start,:2], (n_time_steps, 1)), axis=-1)
+
+    # For each time step
+    aligned_data = data.copy()  # preallocate memory
+    for ix_time in range(data.shape[0]):
+
+        # For each marker
+        for ix_marker in range(data.shape[-1]):
+
+            # Rotate the marker data
+            aligned_data[ix_time,:,ix_marker] = ( R @ data[ix_time,:,ix_marker])
+    return aligned_data
+
