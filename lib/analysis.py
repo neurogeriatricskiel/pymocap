@@ -29,21 +29,20 @@ def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
     #       minimum time between two successive peaks: 100 ms
     thr_min_vel_x = 0.1*(np.max(mid_foot_vel[:,0]) - np.min(mid_foot_vel[:,0]))
     thr_min_vel_z = 0.1*(np.max(mid_foot_vel[:,-1]) - np.min(mid_foot_vel[:,-1]))
-    thr_min_dist = np.round(0.100*fs)
 
     # Find (positive) peaks in the horizontal velocity
-    ix_max_vel_x, _ = find_peaks(mid_foot_vel[:,0], height=thr_min_vel_x, distance=thr_min_dist)
+    ix_max_vel_x, _ = find_peaks(mid_foot_vel[:,0], height=thr_min_vel_x, distance=fs//4)
 
     # Find positive and negative peaks in the vertical velocity    
-    ix_max_vel_z, _ = find_peaks(mid_foot_vel[:,-1], height=thr_min_vel_z, distance=thr_min_dist)
-    ix_min_vel_z, _ = find_peaks(-mid_foot_vel[:,-1], height=thr_min_vel_z, distance=thr_min_dist)
+    ix_max_vel_z, _ = find_peaks(mid_foot_vel[:,-1], height=thr_min_vel_z, distance=fs//10)
+    ix_min_vel_z, _ = find_peaks(-mid_foot_vel[:,-1], height=thr_min_vel_z, distance=fs//10)
 
     # For each peak in the horizontal velocity (assumed to correspond to midswing)
     ix_IC, ix_FC = [], []
     for ix_pk in ix_max_vel_x:
 
         # Consider the negative peaks following the current (horizontal) peak
-        f = np.argwhere(np.logical_and(ix_min_vel_z > ix_pk, ix_min_vel_z < ix_pk+np.round(0.250*fs)))[:,0]
+        f = np.argwhere(np.logical_and(ix_min_vel_z > ix_pk, ix_min_vel_z < ix_pk+fs//4))[:,0]
         if len(f) > 0:
 
             # First local minimum corresponds to initial contact
@@ -57,7 +56,7 @@ def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
             ix_FC.append(ix_max_vel_z[f[-1]])
     return np.array(ix_IC), np.array(ix_FC)
 
-def _get_gait_events_Zeni(heel_pos, toe_pos, sacrum_pos, fs):
+def _get_gait_events_Zeni(heel_pos, toe_pos, pelvis_pos, fs):
     """Detect gait events from optical motion capture data according to Zeni Jr et al. (2008).
 
     Parameters
@@ -66,31 +65,29 @@ def _get_gait_events_Zeni(heel_pos, toe_pos, sacrum_pos, fs):
         The heel marker position data.
     toe_pos : (N, 3) array_like
         The toe marker position data.
-    sacrum_pos : (N, 3) array_like
-        The sacral marker position data.
+    pelvis_pos : (N, 3) array_like
+        The virtual pelvis marker position data.
     fs : int, float
         Sampling frequency (in Hz).
     """
 
     # Calculate marker position data relative to sacral markers
-    heel_pos_rel = heel_pos - sacrum_pos
-    toe_pos_rel = toe_pos - sacrum_pos
+    heel_pos_rel = heel_pos - pelvis_pos
+    toe_pos_rel = toe_pos - pelvis_pos
 
     # Subtract the mean
     heel_pos_rel = heel_pos_rel - np.mean(heel_pos_rel, axis=0)
     toe_pos_rel = toe_pos_rel - np.mean(toe_pos_rel, axis=0)
 
     # Set thresholds
-    range_x = np.max(heel_pos_rel[:,0]) - np.min(heel_pos_rel[:,0])
-    thr_min_height = 0.1 * range_x
-    thr_min_dist = np.round(0.250*fs)
+    thr_min_height = 0.1 * ( np.max(heel_pos_rel[:,0]) - np.min(heel_pos_rel[:,0]) )
+    thr_min_dist = fs//4
 
     # Find peaks in the heel marker relative position data
     ix_IC, _ = find_peaks(heel_pos_rel[:,0], height=thr_min_height, distance=thr_min_dist)
 
     # Find minima in the toe marker relative position data
-    range_x = np.max(toe_pos_rel[:,0]) - np.min(toe_pos_rel[:,0])
-    thr_min_height = 0.1 * range_x
+    thr_min_height = 0.1 * ( np.max(toe_pos_rel[:,0]) - np.min(toe_pos_rel[:,0]) )
     ix_FC, _ = find_peaks(-toe_pos_rel[:,0], height=thr_min_height, distance=thr_min_dist)
     return np.array(ix_IC), np.array(ix_FC)
 
@@ -118,39 +115,21 @@ def _get_gait_events_from_OMC(data, fs, labels, method="OConnor"):
     r_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_psis')[:,0]], axis=-1)
     l_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_asis')[:,0]], axis=-1)
     r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
+    pelvis_pos = ( l_psis_pos + r_psis_pos + l_asis_pos + r_asis_pos ) / 4
 
-    # Get position data for auxiliary markers
-    start_1 = np.squeeze(data[:,:,np.argwhere(labels=='start_1')[:,0]], axis=-1)
-    start_2 = np.squeeze(data[:,:,np.argwhere(labels=='start_2')[:,0]], axis=-1)
-    end_1 = np.squeeze(data[:,:,np.argwhere(labels=='end_1')[:,0]], axis=-1)
-    end_2 = np.squeeze(data[:,:,np.argwhere(labels=='end_2')[:,0]], axis=-1)
-
-    # Determine beginning and ending of the trial
-    mid_asis = ( l_asis + r_asis ) / 2
-    mid_psis = ( l_psis + r_psis ) / 2
-    mid_start = ( start_1 + start_2 ) / 2
-    mid_end = ( end_1 + end_2 ) / 2
-
-    
-
+    # Switch methods  
     if method.upper() == "OCONNOR":
-        l_heel_pos = data[:,:,np.argwhere(labels=='l_heel')[:,0][0]]
-        l_toe_pos = data[:,:,np.argwhere(labels=='l_toe')[:,0][0]]
+        # Left initial and final contacts
         l_ix_IC, l_ix_FC = _get_gait_events_OConnor(l_heel_pos, l_toe_pos, fs)
 
-        r_heel_pos = data[:,:,np.argwhere(labels=='r_heel')[:,0][0]]
-        r_toe_pos = data[:,:,np.argwhere(labels=='r_toe')[:,0][0]]
+        # Right initial and final contacts
         r_ix_IC, r_ix_FC = _get_gait_events_OConnor(r_heel_pos, r_toe_pos, fs)
-    elif method.upper() == "ZENI":
-        l_heel_pos = data[:,:,np.argwhere(labels=='l_heel')[:,0][0]]
-        l_toe_pos = data[:,:,np.argwhere(labels=='l_toe')[:,0][0]]
-        l_psis_pos = data[:,:,np.argwhere(labels=='l_psis')[:,0][0]]
-        l_ix_IC, l_ix_FC = _get_gait_events_Zeni(l_heel_pos, l_toe_pos, l_psis_pos, fs)
+    elif method.upper() == "ZENI" or method.upper() == "ZENIJR":
+        # Left initial and final contacts
+        l_ix_IC, l_ix_FC = _get_gait_events_Zeni(l_heel_pos, l_toe_pos, pelvis_pos, fs)
 
-        r_heel_pos = data[:,:,np.argwhere(labels=='r_heel')[:,0][0]]
-        r_toe_pos = data[:,:,np.argwhere(labels=='r_toe')[:,0][0]]
-        r_psis_pos = data[:,:,np.argwhere(labels=='r_psis')[:,0][0]]
-        r_ix_IC, r_ix_FC = _get_gait_events_Zeni(r_heel_pos, r_toe_pos, r_psis_pos, fs)
+        # Right initial and final contacts
+        r_ix_IC, r_ix_FC = _get_gait_events_Zeni(r_heel_pos, r_toe_pos, pelvis_pos, fs)
     else:
         pass
     return l_ix_IC, l_ix_FC, r_ix_IC, r_ix_FC

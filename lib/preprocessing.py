@@ -309,6 +309,47 @@ def _butter_lowpass(data, fs, filter_order=4, cutoff_frequency=5.):
     filtered_data = filtfilt(b, a, data, axis=0, padtype="odd", padlen=3*(max(len(b),len(a))-1))
     return filtered_data
 
+def _get_start_end_index(data, labels):
+    """Get the index of the start and end of the trial.
+    The start is defined as the virtual pelvis marker crossing the start line,
+    and the same holds for the ends, when the pelvis marker crosses the end line.
+
+    Parameters
+    ----------
+    data : (N, 3, M) array_like
+        The marker data with N time steps across 3 dimensions for M markers.
+    labels : (M,) array_like
+        An array of marker labels.
+    
+    Returns
+    -------
+    ix_start, ix_end : int
+        The start and end index of the trial.
+    """
+    # Get the iliac spine markers
+    l_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_psis')[:,0]], axis=-1)
+    r_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_psis')[:,0]], axis=-1)
+    l_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_asis')[:,0]], axis=-1)
+    r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
+    pelvis_pos = ( l_asis_pos + l_psis_pos + r_asis_pos + r_psis_pos ) / 4
+
+    # Get position data for auxiliary markers
+    start_1 = np.squeeze(data[:,:,np.argwhere(labels=='start_1')[:,0]], axis=-1)
+    start_2 = np.squeeze(data[:,:,np.argwhere(labels=='start_2')[:,0]], axis=-1)
+    end_1 = np.squeeze(data[:,:,np.argwhere(labels=='end_1')[:,0]], axis=-1)
+    end_2 = np.squeeze(data[:,:,np.argwhere(labels=='end_2')[:,0]], axis=-1)
+    mid_start = ( start_1 + start_2 ) / 2
+    mid_end = ( end_1 + end_2 ) / 2
+
+    # Get the estimated start and end of the trial
+    distances = np.sqrt(np.sum(((pelvis_pos - mid_start)**2), axis=1))
+    ix_start = np.argmin(distances)
+    del distances
+    distances = np.sqrt(np.sum(((pelvis_pos - mid_end)**2), axis=1))
+    ix_end = np.argmin(distances)
+    del distances
+    return ix_start, ix_end
+
 def _align_trajectories_with_walking_direction(data, labels):
     """Align the marker trajectories with the main direction of walking.
 
@@ -334,22 +375,8 @@ def _align_trajectories_with_walking_direction(data, labels):
     r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
     pelvis_pos = ( l_asis_pos + l_psis_pos + r_asis_pos + r_psis_pos ) / 4
 
-    # Get position data for auxiliary markers
-    start_1 = np.squeeze(data[:,:,np.argwhere(labels=='start_1')[:,0]], axis=-1)
-    start_2 = np.squeeze(data[:,:,np.argwhere(labels=='start_2')[:,0]], axis=-1)
-    end_1 = np.squeeze(data[:,:,np.argwhere(labels=='end_1')[:,0]], axis=-1)
-    end_2 = np.squeeze(data[:,:,np.argwhere(labels=='end_2')[:,0]], axis=-1)
-    mid_start = ( start_1 + start_2 ) / 2
-    mid_end = ( end_1 + end_2 ) / 2
-
     # Get the estimated start and end of the trial
-    distances = np.sqrt(np.sum(((pelvis_pos - mid_start)**2), axis=1))
-    ix_start = np.argmin(distances)
-    del distances
-
-    distances = np.sqrt(np.sum(((pelvis_pos - mid_end)**2), axis=1))
-    ix_end = np.argmin(distances)
-    del distances
+    ix_start, ix_end = _get_start_end_index(data, labels)
 
     # Estimate the walking direction
     e_x = pelvis_pos[ix_end,:] - pelvis_pos[ix_start,:]
