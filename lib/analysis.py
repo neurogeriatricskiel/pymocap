@@ -3,6 +3,138 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.spatial import distance
 
+def _extract_temporal_gait_params(left_ix_IC, left_ix_FC, right_ix_IC, right_ix_FC, fs):
+    """Extracts temporal gait parameters based on the detected left and right initial and final contacts.
+
+    Parameters
+    ----------
+    left_ix_IC : (N,) array_like
+        Array of indexes corresponding to left initial contacts.
+    left_ix_FC : (M,) array_like
+        Likewise, but for the left final contacts.
+    right_ix_IC : (K,) array_like
+        Likewise, but for the right initial contacts.
+    right_ix_FC : (L,) array_like
+        Likewise, but for the right final contacts.
+    fs : int, float
+        Sampling frequency (Hz).
+    
+    Returns
+    -------
+    """
+    left_stride_time, left_stance_time, left_swing_time = [], [], []
+
+    # Loop over the events
+    for i in range(len(left_ix_IC)-1):
+        left_stride_time.append((left_ix_IC[i+1] - left_ix_IC[i]) / fs)  # stride time
+        f = np.argwhere(np.logical_and(left_ix_FC > left_ix_IC[i], left_ix_FC < left_ix_IC[i+1]))[:,0]
+        if len(f) > 0:
+            left_stance_time.append((left_ix_FC[f[0]] - left_ix_IC[i]) / fs)
+            left_swing_time.append((left_ix_IC[i+1] - left_ix_FC[f[0]])/fs)
+
+    right_stride_time, right_stance_time, right_swing_time = [], [], []
+
+    # Loop over the events
+    for i in range(len(right_ix_IC)-1):
+        right_stride_time.append((right_ix_IC[i+1] - right_ix_IC[i]) / fs)  # stride time
+        f = np.argwhere(np.logical_and(right_ix_FC > right_ix_IC[i], right_ix_FC < right_ix_IC[i+1]))[:,0]
+        if len(f) > 0:
+            right_stance_time.append((right_ix_FC[f[0]] - right_ix_IC[i]) / fs)
+            right_swing_time.append((right_ix_IC[i+1] - right_ix_FC[f[0]])/fs)
+
+    double_limb_support_time, single_limb_support_time = [], []
+    if left_ix_IC[0] < right_ix_IC[0]:
+        print("Left before right")
+        for i in range(len(left_ix_IC)-1):
+            # Find the right FC following the current left IC
+            f = np.argwhere(np.logical_and(right_ix_FC > left_ix_IC[i], right_ix_FC < left_ix_IC[i+1]))[:,0]
+            if len(f) > 0:
+                g = np.argwhere(np.logical_and(right_ix_IC > right_ix_FC[f[0]], right_ix_IC < left_ix_IC[i+1]))[:,0]
+                if len(g) > 0:
+                    h = np.argwhere(np.logical_and(left_ix_FC > right_ix_IC[g[0]], left_ix_FC < left_ix_IC[i+1]))[:,0]
+                    if len(h) > 0:
+                        double_limb_support_time.append(( (right_ix_FC[f[0]] - left_ix_IC[i]) + (left_ix_FC[h[0]] - right_ix_IC[g[0]]) ) / fs)
+                        single_limb_support_time.append(( (right_ix_IC[g[0]] - right_ix_FC[f[0]]) + (left_ix_IC[i+1] - left_ix_FC[h[0]]) ) / fs)
+    else:
+        for i in range(len(right_ix_IC)-1):
+            f = np.argwhere(np.logical_and(left_ix_FC > right_ix_IC[i], left_ix_FC < right_ix_IC[i+1]))[:,0]
+            if len(f) > 0:
+                g = np.argwhere(np.logical_and(left_ix_IC > left_ix_FC[f[0]], left_ix_IC < right_ix_IC[i+1]))[:,0]
+                if len(g) > 0:
+                    h = np.argwhere(np.logical_and(right_ix_FC > left_ix_IC[g[0]], right_ix_FC < right_ix_IC[i+1]))[:,0]
+                    if len(h) > 0:
+                        double_limb_support_time.append(( (left_ix_FC[f[0]] - right_ix_IC[i]) + (right_ix_FC[h[0]] - left_ix_IC[g[0]]) ) / fs)
+                        single_limb_support_time.append(( (left_ix_IC[g[0]] - left_ix_FC[f[0]]) + (right_ix_IC[i+1] - right_ix_FC[h[0]]) ) / fs)
+    
+    # Output dictionary
+    out = {"left_stride_time": np.array(left_stride_time), "left_stance_time": np.array(left_stance_time), "left_swing_time": np.array(left_swing_time), \
+        "right_stride_time": np.array(right_stride_time), "right_stance_time": np.array(right_stance_time), "right_swing_time": np.array(right_swing_time), \
+            "double_limb_support_time": np.array(double_limb_support_time), "single_limb_support_time": np.array(single_limb_support_time)}
+    return out
+
+def _get_gait_events_Pijnappels(heel_pos, toe_pos, fs):
+    """Detect gait events from optical motion capture data according to Pijnappels et al. (2001).
+
+    Parameters
+    ----------
+    heel_pos : (N, 3) array_like
+        The heel marker position data.
+    toe_pos : (N, 3) array_like
+        The toe marker position data.
+    fs : int, float
+        Sampling frequency (in Hz).
+    """
+
+    # Calculate the mid foot
+    mid_foot_pos = ( heel_pos + toe_pos ) / 2
+
+    # Calculate the velocity signals
+    heel_vel = ( heel_pos[1:,:] - heel_pos[:-1,:] ) / (1./fs)
+    toe_vel = ( toe_pos[1:,:] - toe_pos[:-1,:] ) / (1./fs)
+    mid_foot_vel = ( mid_foot_pos[1:,:] - mid_foot_pos[:-1,:] ) / (1./fs)
+
+    # Detect peaks in the velocity signals
+    #   Define thresholds
+    #       minimum horizontal velocity: 10% of the range in horizontal velocity
+    #       minimum vertical velocity: 10% of the range in vertical veloctity
+    #       minimum time between two successive peaks: 100 ms
+    thr_min_vel_x = 0.1*(np.max(mid_foot_vel[:,0]) - np.min(mid_foot_vel[:,0]))
+    thr_min_mid_foot_vel_z = 0.1*(np.max(mid_foot_vel[:,-1]) - np.min(mid_foot_vel[:,-1]))
+    thr_min_heel_vel_z = 0.1*(np.max(heel_vel[:,-1]) - np.min(heel_vel[:,-1]))
+    thr_min_toe_vel_z = 0.1*(np.max(toe_vel[:,-1]) - np.min(toe_vel[:,-1]))
+
+    # Find (positive) peaks in the horizontal velocity
+    ix_max_vel_x, _ = find_peaks(mid_foot_vel[:,0], height=thr_min_vel_x, distance=fs//4)
+
+    # Find positive and negative peaks in the vertical velocity
+    ix_max_mid_foot_vel_z, _ = find_peaks(mid_foot_vel[:,-1], height=thr_min_mid_foot_vel_z, distance=fs//10)
+    ix_min_mid_foot_vel_z, _ = find_peaks(-mid_foot_vel[:,-1], height=thr_min_mid_foot_vel_z, distance=fs//10)
+    ix_max_heel_vel_z, _ = find_peaks(heel_vel[:,-1], height=thr_min_heel_vel_z, distance=fs//10)
+    ix_min_heel_vel_z, _ = find_peaks(-heel_vel[:,-1], height=thr_min_heel_vel_z, distance=fs//10)
+    ix_max_toe_vel_z, _ = find_peaks(toe_vel[:,-1], height=thr_min_toe_vel_z, distance=fs//10)
+    ix_min_toe_vel_z, _ = find_peaks(-toe_vel[:,-1], height=thr_min_toe_vel_z, distance=fs//10)
+
+    # [...] The timing of HS (IC) correlated closely to the time of a local minimum in the vertical
+    # velocity component of the toe marker. [...] (Pijnappels et al., 2001)
+    # For each peak in the horizontal velocity (assumed to correspond to midswing)
+    ix_IC, ix_FC = [], []
+    for ix_pk in ix_max_vel_x:
+
+        # Consider the negative peaks following the current (horizontal) peak
+        f = np.argwhere(np.logical_and(ix_min_toe_vel_z > ix_pk, ix_min_toe_vel_z < ix_pk+fs//4))[:,0]
+        if len(f) > 0:
+
+            # First local minimum corresponds to initial contact
+            ix_IC.append(ix_min_toe_vel_z[f[0]])
+        
+        # Consider the positive peaks preceding the current (horizontal) peak
+        f = np.argwhere(ix_max_heel_vel_z < ix_pk)[:,0]
+        if len(f) > 0:
+
+            # Last local maximum corresponds to final contact
+            ix_FC.append(ix_max_heel_vel_z[f[-1]])
+    return np.array(ix_IC), np.array(ix_FC)
+
 def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
     """Detect gait events from optical motion capture data according to O'Connor et al. (2007).
 
@@ -130,6 +262,12 @@ def _get_gait_events_from_OMC(data, fs, labels, method="OConnor"):
 
         # Right initial and final contacts
         r_ix_IC, r_ix_FC = _get_gait_events_Zeni(r_heel_pos, r_toe_pos, pelvis_pos, fs)
+    elif method.upper() == "PIJNAPPELS":
+        # Left initial and final contacts
+        l_ix_IC, l_ix_FC = _get_gait_events_Pijnappels(l_heel_pos, l_toe_pos, fs)
+
+        # Right initial and final contacts
+        r_ix_IC, r_ix_FC = _get_gait_events_Pijnappels(r_heel_pos, r_toe_pos, fs)
     else:
         pass
     return l_ix_IC, l_ix_FC, r_ix_IC, r_ix_FC

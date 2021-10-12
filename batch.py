@@ -2,30 +2,34 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from lib.utils import _load_file
-from lib.preprocessing import _predict_missing_markers, _butter_lowpass
-from lib.analysis import _get_gait_events_from_OMC
+from lib.preprocessing import _predict_missing_markers, _butter_lowpass, _align_trajectories_with_walking_direction, _get_start_end_index
+from lib.analysis import _get_gait_events_from_OMC, _extract_temporal_gait_params
 import os
 from scipy.signal import find_peaks
 
 def main():
-    """Run the main method.
+    """Run main.
     """
 
     # Set data directory
-    PARENT_FOLDER = "/mnt/neurogeriatrics_data/Keep Control/Data/lab dataset"
+    # PARENT_FOLDER = "/mnt/neurogeriatrics_data/Keep Control/Data/lab dataset"  # on Linux
+    PARENT_FOLDER = "Z:\\Keep Control\\Data\\lab dataset"
 
     # Get a list of participant ids
     participant_ids = [folder_name for folder_name in os.listdir(PARENT_FOLDER) if folder_name.startswith("pp")]
 
+    # Trial
+    trial_name = "walk_preferred"
+
     # Loop over the participants
-    for participant_id in participant_ids[4:5]:
+    for (ix_participant, participant_id) in enumerate(participant_ids[8:10]):
         print(f"{participant_id}")
 
         # Get a list of optical motion capture files
         omc_filenames = [file_name for file_name in os.listdir(os.path.join(PARENT_FOLDER, participant_id, "optical")) if file_name.endswith(".mat")]
 
         # Select only the relevant walking trial
-        ix_omc_filename = [ix for ix in range(len(omc_filenames)) if ("walk_preferred" in omc_filenames[ix])]
+        ix_omc_filename = [ix for ix in range(len(omc_filenames)) if (trial_name in omc_filenames[ix])]
         if len(ix_omc_filename) > 0:
             ix_omc_filename = ix_omc_filename[0]
             omc_filename = omc_filenames[ix_omc_filename]
@@ -38,114 +42,102 @@ def main():
                 omc_data = _load_file(os.path.join(PARENT_FOLDER, participant_id, "optical", omc_filename))
                 imu_data = _load_file(os.path.join(PARENT_FOLDER, participant_id, "imu", imu_filename))
 
-                # Process optical motion capture data
-                # 0. Get sampling frequency
+                # Preprocess optical motion capture data
+                # 0. Get sampling frequency, raw marker data, and data dimensions
                 fs = omc_data["fs"]
-
-                # 1. Fill gaps in the marker data
-                M = omc_data["pos"][:,:3,:]
-                n_time_steps, n_dimensions, n_markers = M.shape
-                M = np.reshape(M, (n_time_steps, 3*n_markers), order="F")
-                M = _predict_missing_markers(M)
+                raw_data = omc_data["pos"][:,:3,:]
+                n_time_steps, n_dimensions, n_markers = raw_data.shape
+                
+                # 1. Fill gaps in marker trajectories
+                raw_data = np.reshape(raw_data, (n_time_steps, n_dimensions * n_markers), order="F")
+                filled_data = _predict_missing_markers(raw_data)
 
                 # 2. Low-pass filter the gap-free marker data
-                M = _butter_lowpass(M, fs)
-                M = np.reshape(M, (n_time_steps, n_dimensions, n_markers), order="F")  # reshape back in original .mat format
+                filtered_data = _butter_lowpass(filled_data, fs)
+                filtered_data = np.reshape(filtered_data, (n_time_steps, n_dimensions, n_markers), order="F")
+                ix_start, ix_end = _get_start_end_index(filtered_data, omc_data["marker_location"])
 
-                # 3.1. Detect gait events
-                l_heel_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="l_heel")[:,0][0]]
-                l_toe_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="l_toe")[:,0][0]]
-                l_psis_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="l_psis")[:,0][0]]
-                l_asis_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="l_asis")[:,0][0]]
-                r_heel_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="r_heel")[:,0][0]]
-                r_toe_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="r_toe")[:,0][0]]
-                r_psis_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="r_psis")[:,0][0]]
-                r_asis_pos = M[:,:,np.argwhere(omc_data["marker_location"]=="r_asis")[:,0][0]]
-                l_ix_IC, _, r_ix_IC, _ = _get_gait_events_from_OMC(M, fs, omc_data["marker_location"], method="OConnor")
-                _, l_ix_FC, _, r_ix_FC = _get_gait_events_from_OMC(M, fs, omc_data["marker_location"], method="Zeni")
+                # 3. Align data with main direction of walking
+                aligned_data = _align_trajectories_with_walking_direction(filtered_data, omc_data["marker_location"])
 
-                # 3.2. Detect start and end of 5 meters within the current trial
-                mid_psis_pos = ( l_psis_pos + r_psis_pos ) / 2
-                start_1 = M[:,:,np.argwhere(omc_data["marker_location"]=="start_1")[:,0][0]]
-                start_2 = M[:,:,np.argwhere(omc_data["marker_location"]=="start_2")[:,0][0]]
-                end_1 = M[:,:,np.argwhere(omc_data["marker_location"]=="end_1")[:,0][0]]
-                end_2 = M[:,:,np.argwhere(omc_data["marker_location"]=="end_2")[:,0][0]]
-                start_, end_ = (start_1 + start_2) / 2, (end_1 + end_2) / 2
-                dst_2_start = np.sqrt(np.sum(((mid_psis_pos-start_)**2)[:,:2], axis=1))  # distance to start
-                dst_2_end = np.sqrt(np.sum(((mid_psis_pos - end_)**2)[:,:2], axis=1))    # distance to end
-                ix_start_, ix_end_ = np.argmin(dst_2_start), np.argmin(dst_2_end)
-                left_ix_IC = l_ix_IC[np.argwhere(np.logical_and(l_ix_IC > ix_start_, l_ix_IC < ix_end_))[:,0]]
-                left_ix_FC = l_ix_FC[np.argwhere(np.logical_and(l_ix_FC > ix_start_, l_ix_FC < ix_end_))[:,0]]
-                right_ix_IC = r_ix_IC[np.argwhere(np.logical_and(r_ix_IC > ix_start_, r_ix_IC < ix_end_))[:,0]]
-                right_ix_FC = r_ix_FC[np.argwhere(np.logical_and(r_ix_FC > ix_start_, r_ix_FC < ix_end_))[:,0]]
-                print(l_ix_IC)
+                # 4. Detect gait events
+                l_ix_IC, _, r_ix_IC, _ = _get_gait_events_from_OMC(aligned_data, fs, omc_data["marker_location"], method="OConnor")
+                _, l_ix_FC, _, r_ix_FC = _get_gait_events_from_OMC(aligned_data, fs, omc_data["marker_location"], method="ZeniJr")
+                left_ix_IC = l_ix_IC[np.logical_and(l_ix_IC >= ix_start, l_ix_IC <= ix_end)]
+                left_ix_FC = l_ix_FC[np.logical_and(l_ix_FC >= ix_start, l_ix_FC <= ix_end)]
+                right_ix_IC = r_ix_IC[np.logical_and(r_ix_IC >= ix_start, r_ix_IC <= ix_end)]
+                right_ix_FC = r_ix_FC[np.logical_and(r_ix_FC >= ix_start, r_ix_FC <= ix_end)]
 
-                # 3.3. Visualize
+                # 5. Visualize
                 iplot = True
-                if iplot == 1:
-                    fig, axs = plt.subplots(3, 1, figsize=(12.8, 9.6))
-                    axs[0].plot(l_heel_pos[:,2], ls='-', c=(0, 0, 1, 0.1), lw=2)
-                    axs[0].plot(np.arange(ix_start_, ix_end_), l_heel_pos[ix_start_:ix_end_,2], ls='-', c=(0, 0, 1, 1), lw=1, label='left heel')
-                    axs[0].plot(l_toe_pos[:,2], ls='-.', c=(0, 0, 1, 0.1), lw=2)
-                    axs[0].plot(np.arange(ix_start_, ix_end_), l_toe_pos[ix_start_:ix_end_,2], ls='-.', c=(0, 0, 1, 1), lw=1, label='left toe')
-                    axs[0].plot(r_heel_pos[:,2], ls='-', c=(1, 0, 0, 0.1), lw=2)
-                    axs[0].plot(np.arange(ix_start_, ix_end_), r_heel_pos[ix_start_:ix_end_,2], ls='-', c=(1, 0, 0, 1), lw=1, label='right heel')
-                    axs[0].plot(r_toe_pos[:,2], ls='-.', c=(1, 0, 0, 0.1), lw=2)
-                    axs[0].plot(np.arange(ix_start_, ix_end_), r_toe_pos[ix_start_:ix_end_,2], ls='-.', c=(1, 0, 0, 1), lw=1, label='right toe')
+                if iplot == True:
 
-                    axs[0].plot(l_ix_IC, l_heel_pos[l_ix_IC,2], ls='none', marker='o', mec=(0, 0, 1, 0.1), mfc=(0, 0, 1, 0.1))
-                    axs[0].plot(left_ix_IC, l_heel_pos[left_ix_IC,2], ls='none', marker='o', mec=(0, 0, 1, 1), mfc=(0, 0, 1, 1), label='left IC')
-                    # axs[0].plot(l_ix_FC, l_toe_pos[l_ix_FC,2], ls='none', marker='o', mec=(0, 0, 1, 0.1), mfc='none')
-                    # axs[0].plot(left_ix_FC, l_toe_pos[left_ix_FC,2], ls='none', marker='o', mec=(0, 0, 1, 1), mfc='none', label='left FC')
-                    # axs[0].plot(r_ix_IC, r_heel_pos[r_ix_IC,2], ls='none', marker='o', mec=(1, 0, 0, 0.1), mfc=(1, 0, 0, 0.1))
-                    # axs[0].plot(right_ix_IC, r_heel_pos[right_ix_IC,2], ls='none', marker='o', mec=(1, 0, 0, 1), mfc=(1, 0, 0, 1), label='right IC')
-                    # axs[0].plot(r_ix_FC, r_toe_pos[r_ix_FC,2], ls='none', marker='o', mec=(1, 0, 0, 0.1), mfc='none')
-                    # axs[0].plot(right_ix_FC, r_toe_pos[right_ix_FC,2], ls='none', marker='o', mec=(1, 0, 0, 1), mfc='none', label='right FC')
-                    
-                    # Plot top view
-                    axs[1].plot(np.mean(start_1[:,0]), np.mean(start_1[:,1]), ls='none', marker='^', mec='k', mfc='none')
-                    axs[1].plot(np.mean(start_2[:,0]), np.mean(start_2[:,1]), ls='none', marker='^', mec='k', mfc='k')
-                    axs[1].plot(np.mean(end_1[:,0]), np.mean(end_1[:,1]), ls='none', marker='v', mec='k', mfc='none')
-                    axs[1].plot(np.mean(end_2[:,0]), np.mean(end_2[:,1]), ls='none', marker='v', mec='k', mfc='k')
-                    axs[1].plot(mid_psis_pos[ix_start_,0], mid_psis_pos[ix_start_,1], ls='none', marker='o', mfc='none', mec='k')
-                    axs[1].plot(mid_psis_pos[ix_end_,0], mid_psis_pos[ix_end_,1], ls='none', marker='o', mfc='k', mec='k')
-                    axs[1].plot(mid_psis_pos[:,0], mid_psis_pos[:,1], ls='-', c=(0, 0, 0, 0.2), lw=2)
-                    axs[1].plot([mid_psis_pos[ix_start_,0], mid_psis_pos[ix_end_,0]], [mid_psis_pos[ix_start_,1], mid_psis_pos[ix_end_,1]], ':', c=(0, 0, 0, 0.8))
-                    axs[1].plot(mid_psis_pos[ix_start_:ix_end_,0], mid_psis_pos[ix_start_:ix_end_,1], ls='-', c=(0, 0, 0, 1), lw=1, label='mid psis')
+                    # Get relevant position markers
+                    l_psis_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="l_psis")[:,0]], axis=-1)
+                    r_psis_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="r_psis")[:,0]], axis=-1)
+                    l_asis_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="l_asis")[:,0]], axis=-1)
+                    r_asis_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="r_asis")[:,0]], axis=-1)
+                    pelvis_pos = ( l_psis_pos + r_psis_pos + l_asis_pos + r_asis_pos ) / 4
+                    l_heel_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="l_heel")[:,0]], axis=-1)
+                    r_heel_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="r_heel")[:,0]], axis=-1)
+                    l_toe_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="l_toe")[:,0]], axis=-1)
+                    r_toe_pos = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="r_toe")[:,0]], axis=-1)
+                    start_1 = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="start_1")[:,0]], axis=-1)
+                    start_2 = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="start_2")[:,0]], axis=-1)
+                    end_1 = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="end_1")[:,0]], axis=-1)
+                    end_2 = np.squeeze(aligned_data[:,:,np.argwhere(omc_data["marker_location"]=="end_2")[:,0]], axis=-1)
 
-                    # Define the direction vector
-                    v = mid_psis_pos[ix_end_,:] - mid_psis_pos[ix_start_,:]  # shape: (3,)
-                    print(f"Shape of v: {v.shape}")
+                    fig, axs = plt.subplots(2, 1, figsize=(19.2, 9.6))
+                    # Top view
+                    # -- Start and end cones
+                    axs[0].plot(np.mean(start_1[:,0]), np.mean(start_1[:,1]), 'o', mfc='none', mec=(0, 0, 0, 1), ms=6)
+                    axs[0].plot(np.mean(start_2[:,0]), np.mean(start_2[:,1]), 'o', mfc=(0, 0, 0, 1), mec=(0, 0, 0, 1), ms=6)
+                    axs[0].plot(np.mean(end_1[:,0]), np.mean(end_1[:,1]), 's', mfc='none', mec=(0, 0, 0, 1), ms=6)
+                    axs[0].plot(np.mean(end_2[:,0]), np.mean(end_2[:,1]), 's', mfc=(0, 0, 0, 1), mec=(0, 0, 0, 1), ms=6)
+                    # -- Virtual pelvis marker
+                    axs[0].plot(pelvis_pos[:,0], pelvis_pos[:,1], '-', c=(0, 0, 0, 0.2), lw=4)
+                    axs[0].plot(pelvis_pos[ix_start:ix_end,0], pelvis_pos[ix_start:ix_end,1], '-', c=(0, 0, 0, 1), lw=1)
+                    # -- Left heel/toe marker
+                    axs[0].plot(l_heel_pos[:,0], l_heel_pos[:,1], '-', c=(0, 0, 1, 0.2), lw=4)
+                    axs[0].plot(l_heel_pos[l_ix_IC,0], l_heel_pos[l_ix_IC,1], 'v', mfc='none', mec=(0, 0, 1, 1), ms=10)
+                    axs[0].plot(l_toe_pos[:,0], l_toe_pos[:,1], '-.', c=(0, 0, 1, 0.1), lw=2)
+                    axs[0].plot(l_toe_pos[l_ix_FC,0], l_toe_pos[l_ix_FC,1], '^', mfc='none', mec=(0, 0, 1, 1), ms=8)
+                    # -- Right heel marker
+                    axs[0].plot(r_heel_pos[:,0], r_heel_pos[:,1], '-', c=(1, 0, 0, 0.2), lw=4)
+                    axs[0].plot(r_heel_pos[r_ix_IC,0], r_heel_pos[r_ix_IC,1], 'v', mfc='none', mec=(1, 0, 0, 1), ms=10)
+                    axs[0].plot(r_toe_pos[:,0], r_toe_pos[:,1], '-.', c=(1, 0, 0, 0.1), lw=2)
+                    axs[0].plot(r_toe_pos[r_ix_FC,0], r_toe_pos[r_ix_FC,1], '^', mfc='none', mec=(1, 0, 0, 1), ms=8)
+                    axs[0].set_xlabel('X position (mm)')
+                    axs[0].set_ylabel('Y position (mm)')
+                    axs[0].spines['right'].set_visible(False)
+                    axs[0].spines['top'].set_visible(False)
 
-                    # Calculate the relative position vector
-                    p = r_heel_pos - mid_psis_pos  # shape: (N, 3)
-                    print(f"Shape of p: {p.shape}")
-
-                    # Project the relative position vector onto the direction vector
-                    w = np.copy(p)
-                    for ti in range(p.shape[0]):
-                        w[ti,:2] = ( np.dot(p[ti,:2].T, v[:2]) / np.dot(v[:2].T, v[:2]) ) * v[:2]
-
-                    axs[2].plot(np.arange(p.shape[0]), p[:,0], '-', c=(0, 0, 0, 0.5))
-                    axs[2].plot(np.arange(w.shape[0]), w[:,0], '-', c=(0, 0, 0, 1))
-                    # axs[1].plot(l_heel_pos[left_ix_IC,0], l_heel_pos[left_ix_IC,1], ls='none', marker='o', mec=(0, 0, 1, 1), mfc=(0, 0, 1, 1))
-                    # axs[1].plot(r_heel_pos[right_ix_IC,0], r_heel_pos[right_ix_IC,1], ls='none', marker='o', mec=(1, 0, 0, 1), mfc=(1, 0, 0, 1))
-                    
-                    # Labels
-                    axs[0].set_xlabel('time (samples)')
-                    axs[0].set_ylabel('Z position (mm)')
-                    axs[1].set_xlabel('X position (mm)')
-                    axs[1].set_ylabel('Y position (mm)')
-                    axs[2].set_xlabel('time (samples)')
-                    axs[2].set_ylabel('rel X position (mm)')
-
-                    axs[0].legend()
-                    axs[1].legend()
-
-                    # 
-                    # plt.savefig(os.path.join("/home/robr/Desktop/figures", participant_id + ".png"), dpi=300, transparent=True)
-                    plt.show()
-
+                    # Sagittal view
+                    # -- Left heel/toe marker
+                    axs[1].plot(np.arange(aligned_data.shape[0]), l_heel_pos[:,2], '-', c=(0, 0, 1, 0.2), lw=4)
+                    axs[1].plot(np.arange(ix_start, ix_end), l_heel_pos[ix_start:ix_end,2], '-', c=(0, 0, 1, 1), lw=1)
+                    axs[1].plot(l_ix_IC, l_heel_pos[l_ix_IC,2], 'v', mfc='none', mec=(0, 0, 1, 0.6), ms=8)
+                    axs[1].plot(left_ix_IC, l_heel_pos[left_ix_IC,2], 'v', mfc=(0, 0, 1, 1), mec=(0, 0, 1, 1), ms=8)
+                    axs[1].plot(np.arange(aligned_data.shape[0]), l_toe_pos[:,2], '-.', c=(0, 0, 1, 0.2), lw=4)
+                    axs[1].plot(np.arange(ix_start, ix_end), l_toe_pos[ix_start:ix_end,2], '-.', c=(0, 0, 1, 1), lw=1)
+                    axs[1].plot(l_ix_FC, l_toe_pos[l_ix_FC,2], '^', mfc='none', mec=(0, 0, 1, 0.6), ms=8)
+                    axs[1].plot(left_ix_FC, l_toe_pos[left_ix_FC,2], '^', mfc=(0, 0, 1, 1), mec=(0, 0, 1, 1), ms=8)
+                    # -- Right heel/toe marker
+                    axs[1].plot(np.arange(aligned_data.shape[0]), r_heel_pos[:,2], '-', c=(1, 0, 0, 0.2), lw=4)
+                    axs[1].plot(np.arange(ix_start, ix_end), r_heel_pos[ix_start:ix_end,2], '-', c=(1, 0, 0, 1), lw=1)
+                    axs[1].plot(r_ix_IC, r_heel_pos[r_ix_IC,2], 'v', mfc='none', mec=(1, 0, 0, 1), ms=8)
+                    axs[1].plot(right_ix_IC, r_heel_pos[right_ix_IC,2], 'v', mfc=(1, 0, 0, 1), mec=(1, 0, 0, 1), ms=8)
+                    axs[1].plot(np.arange(aligned_data.shape[0]), r_toe_pos[:,2], '-.', c=(1, 0, 0, 0.2), lw=4)
+                    axs[1].plot(np.arange(ix_start, ix_end), r_toe_pos[ix_start:ix_end,2], '-.', c=(1, 0, 0, 1), lw=1)
+                    axs[1].plot(r_ix_FC, r_toe_pos[r_ix_FC,2], '^', mfc='none', mec=(1, 0, 0, 1), ms=8)
+                    axs[1].plot(right_ix_FC, r_toe_pos[right_ix_FC,2], '^', mfc=(1, 0, 0, 1), mec=(1, 0, 0, 1), ms=8)
+                    axs[1].set_xlim(0, aligned_data.shape[0])
+                    axs[1].set_xlabel('time (s)')
+                    axs[1].set_ylabel('Z position (mm)')
+                    axs[1].spines['right'].set_visible(False)
+                    axs[1].spines['top'].set_visible(False)
+                    plt.savefig(os.path.join("Z:\\Keep Control\\Output\\lab dataset", "test_figure_"+participant_id+"_"+trial_name+".png"))
+                    # plt.show()
     return
                 
 
