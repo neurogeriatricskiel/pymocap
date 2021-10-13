@@ -1,8 +1,24 @@
 import numpy as np
-from numpy.core.fromnumeric import std
 from numpy.matlib import repmat
 import warnings
+from scipy.signal import filtfilt
 
+def _remove_drift_200Hz(data):
+    """Remove drift by high-pass filtering the data.
+    
+    Parameters
+    ----------
+    data : (N, M) array_like
+        Array of data with N time steps across M channels.
+    """
+
+    # Set filter coefficients
+    b = np.array([1, -1])
+    a = np.array([1, -0.995])
+
+    # Filter in forward and backward pass
+    filtered_data = filtfilt(b, a, data, axis=0, padtype="odd", padlen=3*(max(len(b), len(a))-1))
+    return filtered_data
 
 def _predict_missing_markers(data_gaps, **kwargs):
     """Fills gaps in the marker postion data exploiting intercorrelations between marker coordinates.

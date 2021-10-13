@@ -2,6 +2,7 @@ from math import dist
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.spatial import distance
+from lib.preprocessing import _remove_drift_200Hz, _butter_lowpass
 
 def _extract_temporal_gait_params(left_ix_IC, left_ix_FC, right_ix_IC, right_ix_FC, fs):
     """Extracts temporal gait parameters based on the detected left and right initial and final contacts.
@@ -271,3 +272,163 @@ def _get_gait_events_from_OMC(data, fs, labels, method="OConnor"):
     else:
         pass
     return l_ix_IC, l_ix_FC, r_ix_IC, r_ix_FC
+
+def _rotate_IMU_local_frame(acc, gyro, fs):
+    """Rotate the IMU local frame such that:
+        positive X axis points forward (anteroposterior direction)
+        positive Y axis points to the left (mediolateral direction)
+        positive Z axis points upward (vertical direction)
+
+    Parameters
+    ----------
+    acc : (N, 3) array_like
+        3D accelerometer data (in g) with N time steps across 3 dimensions.
+    gyro : (N, 3) array_like
+        3D gyroscope data (in degrees/s) with N time steps across 3 dimensions.
+    fs : int, float
+        Sampling frequency (in Hz).
+
+    Returns
+    -------
+    acc_out, gyro_out : (N, 3) array_like
+        3D accelerometer and 3D gyroscope data aligned with the anatomical axes.
+    """
+
+    acc_out = np.empty_like(acc)
+    gyro_out = np.empty_like(gyro)
+
+    # Determine the vertical axis from the mean accelerations
+    ix_ax_VT = np.argmax(np.abs(np.mean(acc, axis=0)))
+
+    # Determine the mediolateral axis from the energy of the gyroscope signals
+    ix_ax_ML = np.argmax(np.sum(np.abs(gyro)**2, axis=0))
+
+    # Remaining axis is the anteroposterior axis
+    ix_ax_AP = np.setdiff1d(np.arange(3), np.array([ix_ax_ML, ix_ax_VT]))[0]
+
+    # Determine whether mediolateral axis points to the left or right
+    thr = 0.1 * ( np.max(gyro[:,ix_ax_ML]) - np.min(gyro[:,ix_ax_ML]) )
+    ix_pks_pos, _ = find_peaks(gyro[:,ix_ax_ML], height=thr, distance=fs//4)
+    ix_pks_neg, _ = find_peaks(-gyro[:,ix_ax_ML], height=thr, distance=fs//4)
+    if np.percentile(np.abs(gyro[ix_pks_pos,ix_ax_ML]), 90) > np.percentile(np.abs(gyro[ix_pks_neg,ix_ax_ML]), 90):
+
+        # Mediolateral axis points to the right
+        if np.mean(acc[:,ix_ax_VT]) < -0.5:
+
+            # Vertical axis points down, and thus anteroposterior axis points forward
+            acc_out[:,0], gyro_out[:,0] = acc[:,ix_ax_AP], gyro[:,ix_ax_AP]
+            acc_out[:,1], gyro_out[:,1] = -acc[:,ix_ax_ML], -gyro[:,ix_ax_ML]
+            acc_out[:,2], gyro_out[:,2] = -acc[:,ix_ax_VT], -gyro[:,ix_ax_VT]
+        
+        elif np.mean(acc[:,ix_ax_VT]) > 0.5:
+
+            # Vertical axis points up, and thus anteroposterior axis points backward
+            acc_out[:,0], gyro_out[:,0] = -acc[:,ix_ax_AP], -gyro[:,ix_ax_AP]
+            acc_out[:,1], gyro_out[:,1] = -acc[:,ix_ax_ML], -gyro[:,ix_ax_ML]
+            acc_out[:,2], gyro_out[:,2] = acc[:,ix_ax_VT], gyro[:,ix_ax_VT]
+        
+        else:
+            print("Not sure if vertical points up or down. Please check sensor alignment.")
+            acc_out, gyro_out = acc, gyro
+    else:
+
+        # Mediolateral axis points to the left
+        if np.mean(acc[:,ix_ax_VT]) < -0.5:
+
+            # Vertical axis points down, and thus anteroposterior axis points backward
+            acc_out[:,0], gyro_out[:,0] = -acc[:,ix_ax_AP], -gyro[:,ix_ax_AP]
+            acc_out[:,1], gyro_out[:,1] = acc[:,ix_ax_ML], gyro[:,ix_ax_ML]
+            acc_out[:,2], gyro_out[:,2] = -acc[:,ix_ax_VT], -gyro[:,ix_ax_VT]
+        
+        elif np.mean(acc[:,ix_ax_VT]) > 0.5:
+
+            # Vertical axis points up, and thus anteroposterior axis points forward
+            acc_out[:,0], gyro_out[:,0] = acc[:,ix_ax_AP], gyro[:,ix_ax_AP]
+            acc_out[:,1], gyro_out[:,1] = acc[:,ix_ax_ML], gyro[:,ix_ax_ML]
+            acc_out[:,2], gyro_out[:,2] = acc[:,ix_ax_VT], gyro[:,ix_ax_VT]
+        
+        else:
+            print("Not sure if vertical points up or down. Please check sensor alignment.")
+            acc_out, gyro_out = acc, gyro
+    return acc_out, gyro_out
+
+def _get_gait_events_Salarian(gyro_ML, fs):
+    """Detect gait events from the mediolateral angular velocity of a shank-worn IMU
+    following the methods from Salarian et al. (2004).
+
+    Parameters
+    ----------
+    gyro_ML : (N, 1) array_like
+        Mediolateral angular velocity (in degrees/s) with N time steps.
+        It is assumed that the mediolateral direction is positive to the left, 
+        thus we detect negative peaks corresponding to the midswing.
+    fs : int, float
+        Sampling frequency (in Hz).
+    
+    Returns
+    -------
+    ix_IC, ix_FC : array_like
+        Arrays with the indexes corresponding to initial and final contacts, respectively.
+    """
+
+    # Remove drift
+    filtered_gyro = _remove_drift_200Hz(gyro_ML)
+
+    # Low-pass filter
+    filtered_gyro = _butter_lowpass(filtered_gyro, fs)
+
+    # Detect peaks corresponding to midswing
+    thr = 50.0  # [...] peaks larger than 50 degrees/s were candidates for marking the midswing area [...]
+    ix_MS, _ = find_peaks(-filtered_gyro, height=thr, distance=fs//2)
+
+    # Detect peaks corresponding to initial contacts
+    ix_pks, _ = find_peaks(gyro_ML)
+    ix_IC = []
+    for i in range(len(ix_MS)):
+        # Find the nearest IC after midswing
+        f = np.argwhere(np.logical_and(ix_pks > ix_MS[i], ix_pks <= ix_MS[i]+np.round(1.5*fs)))[:,0]
+        if len(f) > 0:
+            ix_IC.append(ix_pks[f[0]])
+    
+    # Detect peaks corresponding to final contacts
+    thr_ang_vel_FC = 20.0
+    ix_pks, _ = find_peaks(gyro_ML, height=thr_ang_vel_FC)
+    ix_FC = []
+    for i in range(len(ix_MS)):
+        # Find the peak prior to midswing
+        f = np.argwhere(np.logical_and(ix_pks < ix_MS[i], ix_pks >= ix_MS[i]-np.round(1.5*fs)))[:,0]
+        if len(f) > 0:
+            ix_FC.append(ix_pks[f[-1]])
+    return np.array(ix_MS), np.array(ix_IC), np.array(ix_FC)
+
+
+def _get_gait_evens_from_IMU(imu_data, label=""):
+    """Detect gait events from an inertial measurement unit (IMU) from the body position given bu the label.
+
+    Parameters
+    ----------
+    imu_data : dict
+        Dictionary ... 
+    fs : int, float
+        Sampling frequency (in Hz).
+    label : str, optional
+        Label specifying the body position to which the IMU is attached, by default ""
+    """
+    # Get the accelerometer and gyroscope data
+    acc = imu_data["acc"][:,:,np.argwhere(imu_data["imu_location"]==label)[:,0][0]]
+    gyro = imu_data["gyro"][:,:,np.argwhere(imu_data["imu_location"]==label)[:,0][0]]
+    fs = imu_data["fs"]
+
+    if label == "":
+        return
+    elif ("ank" in label) or ("shank" in label):
+        # Rotate the IMU local coordinate frame:
+        # X in forward walking direction
+        # Z in vertical upward direction
+        # Y following from the right-hand rule (to the left)
+        acc, gyro = _rotate_IMU_local_frame(acc, gyro, fs)
+
+        # Detect events from mediolateral angular velocity
+        ix_MS, ix_IC, ix_FC = _get_gait_events_Salarian(gyro[:,1], fs)
+    return acc, gyro, ix_MS, ix_IC, ix_FC
+

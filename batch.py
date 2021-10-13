@@ -3,7 +3,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from lib.utils import _load_file
 from lib.preprocessing import _predict_missing_markers, _butter_lowpass, _align_trajectories_with_walking_direction, _get_start_end_index
-from lib.analysis import _get_gait_events_from_OMC, _extract_temporal_gait_params
+from lib.analysis import _get_gait_events_from_OMC, _get_gait_evens_from_IMU, _extract_temporal_gait_params
 import os
 from scipy.signal import find_peaks
 
@@ -44,7 +44,7 @@ def main():
 
                 # Preprocess optical motion capture data
                 # 0. Get sampling frequency, raw marker data, and data dimensions
-                fs = omc_data["fs"]
+                fs_omc = omc_data["fs"]
                 raw_data = omc_data["pos"][:,:3,:]
                 n_time_steps, n_dimensions, n_markers = raw_data.shape
                 
@@ -53,7 +53,7 @@ def main():
                 filled_data = _predict_missing_markers(raw_data)
 
                 # 2. Low-pass filter the gap-free marker data
-                filtered_data = _butter_lowpass(filled_data, fs)
+                filtered_data = _butter_lowpass(filled_data, fs_omc)
                 filtered_data = np.reshape(filtered_data, (n_time_steps, n_dimensions, n_markers), order="F")
                 ix_start, ix_end = _get_start_end_index(filtered_data, omc_data["marker_location"])
 
@@ -61,8 +61,8 @@ def main():
                 aligned_data = _align_trajectories_with_walking_direction(filtered_data, omc_data["marker_location"])
 
                 # 4. Detect gait events
-                l_ix_IC, _, r_ix_IC, _ = _get_gait_events_from_OMC(aligned_data, fs, omc_data["marker_location"], method="OConnor")
-                _, l_ix_FC, _, r_ix_FC = _get_gait_events_from_OMC(aligned_data, fs, omc_data["marker_location"], method="ZeniJr")
+                l_ix_IC, _, r_ix_IC, _ = _get_gait_events_from_OMC(aligned_data, fs_omc, omc_data["marker_location"], method="Pijnappels")
+                _, l_ix_FC, _, r_ix_FC = _get_gait_events_from_OMC(aligned_data, fs_omc, omc_data["marker_location"], method="ZeniJr")
                 left_ix_IC = l_ix_IC[np.logical_and(l_ix_IC >= ix_start, l_ix_IC <= ix_end)]
                 left_ix_FC = l_ix_FC[np.logical_and(l_ix_FC >= ix_start, l_ix_FC <= ix_end)]
                 right_ix_IC = r_ix_IC[np.logical_and(r_ix_IC >= ix_start, r_ix_IC <= ix_end)]
