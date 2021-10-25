@@ -111,7 +111,8 @@ def _get_gait_events_Pijnappels(heel_pos, toe_pos, fs):
     thr_min_vel_x = 0.1*(np.max(mid_foot_vel[:,0]) - np.min(mid_foot_vel[:,0]))
     thr_min_mid_foot_vel_z = 0.1*(np.max(mid_foot_vel[:,-1]) - np.min(mid_foot_vel[:,-1]))
     thr_min_heel_vel_z = 0.1*(np.max(heel_vel[:,-1]) - np.min(heel_vel[:,-1]))
-    thr_min_toe_vel_z = 0.1*(np.max(toe_vel[:,-1]) - np.min(toe_vel[:,-1]))
+    # thr_min_toe_vel_z = 0.1*(np.max(toe_vel[:,-1]) - np.min(toe_vel[:,-1]))
+    thr_min_toe_vel_z = 0.1 * np.min(-toe_vel[:,2])
 
     # Find (positive) peaks in the horizontal velocity
     ix_max_vel_x, _ = find_peaks(mid_foot_vel[:,0], height=thr_min_vel_x, distance=fs//4)
@@ -401,6 +402,7 @@ def _get_gait_events_Salarian(gyro_ML, fs):
     # Detect peaks corresponding to midswing
     thr = 50.0  # [...] peaks larger than 50 degrees/s were candidates for marking the midswing area [...]
     ix_MS, _ = find_peaks(-filtered_gyro, height=thr, distance=fs//2)
+    ix_MS = ix_MS[-gyro_ML[ix_MS] > thr]
 
     # Detect peaks corresponding to initial contacts
     thr_ang_vel_IC = 10.0
@@ -447,7 +449,35 @@ def _get_gait_events_from_IMU(imu_data, label=""):
         # X in forward walking direction
         # Z in vertical upward direction
         # Y following from the right-hand rule (to the left)
-        acc, gyro = _rotate_IMU_local_frame(acc, gyro, fs)
+        # acc, gyro = _rotate_IMU_local_frame(acc, gyro, fs)
+        if ("right_" in label):
+            acc_ = acc.copy()
+            acc_[:,0] = -acc[:,1]  # anteroposterior == negative Y axis
+            acc_[:,1] = -acc[:,2]  # mediolateral == negative Z axis
+            acc_[:,2] = acc[:,0]    # vertical == positive X axis
+            acc = acc_.copy()
+            del acc_
+
+            gyro_ = gyro.copy()
+            gyro_[:,0] = -gyro[:,1]  # anteroposterior == negative Y axis
+            gyro_[:,1] = -gyro[:,2]  # mediolateral == negative Z axis
+            gyro_[:,2] = gyro[:,0]    # vertical == positive X axis
+            gyro = gyro_.copy()
+            del gyro_
+        elif ("left_"  in label):
+            acc_ = acc.copy()
+            acc_[:,0] = -acc[:,1]  # anteroposterior aligns with negative Y axis
+            acc_[:,1] = -acc[:,2]  # mediolateral aligns with negative Z axis
+            acc_[:,2] = acc[:,0]   # vertical aligns with positive X axis
+            acc = acc_.copy()
+            del acc_
+
+            gyro_ = gyro.copy()
+            gyro_[:,0] = gyro[:,1]  # anteroposterior aligns with positive Y axis
+            gyro_[:,1] = gyro[:,2]  # mediolateral aligns with positive Z axis
+            gyro_[:,2] = gyro[:,0]  # vertical aligns with positive X axis
+            gyro = gyro_.copy()
+            del gyro_
 
         # Detect events from mediolateral angular velocity
         ix_MS, ix_IC, ix_FC = _get_gait_events_Salarian(gyro[:,1], fs)

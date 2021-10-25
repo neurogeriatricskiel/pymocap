@@ -31,7 +31,7 @@ def main():
 
     # Loop over the participants
     l_IC_results, l_FC_results, r_IC_results, r_FC_results = [], [], [], []
-    for (ix_participant, participant_id) in enumerate(participant_ids[-2:]):
+    for (ix_participant, participant_id) in enumerate(participant_ids[105:106]):
         print(f"{ix_participant:>3d}: {participant_id}")
 
         # Get a list of optical motion capture files
