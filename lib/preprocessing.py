@@ -325,6 +325,33 @@ def _butter_lowpass(data, fs, filter_order=4, cutoff_frequency=5.):
     filtered_data = filtfilt(b, a, data, axis=0, padtype="odd", padlen=3*(max(len(b),len(a))-1))
     return filtered_data
 
+def _get_data_from_marker(data, labels, marker):
+    """Get the marker position data from a given marker.
+
+    Parameters
+    ----------
+    data : (N, 3, M) array_like
+        Array-like structure with the marker position data.
+        N time steps, 4 channels, and M markers.
+    labels : array_like
+        Array-like structure with the marker labels.
+    marker : str
+        The marker for which the data is retrieved.
+    
+    Returns
+    -------
+    out : (N, 3) array_like
+        Array-like structure with the marker position data.
+    """
+
+    # Get the position data    
+    try:
+        pos = np.squeeze(data[:,:,np.argwhere(labels==marker)[:,0]], axis=-1)
+        return pos
+    except ValueError:
+        print(f"Could not retrieve any marker position data for the `{marker:s}` marker!")
+        return None
+
 def _get_start_end_index(data, labels):
     """Get the index of the start and end of the trial.
     The start is defined as the virtual pelvis marker crossing the start line,
@@ -343,17 +370,19 @@ def _get_start_end_index(data, labels):
         The start and end index of the trial.
     """
     # Get the iliac spine markers
-    l_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_psis')[:,0]], axis=-1)
-    r_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_psis')[:,0]], axis=-1)
-    l_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_asis')[:,0]], axis=-1)
-    r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
+    l_psis_pos = _get_data_from_marker(data, labels, marker='l_psis')
+    r_psis_pos = _get_data_from_marker(data, labels, marker='r_psis')
+    l_asis_pos = _get_data_from_marker(data, labels, marker='l_asis')
+    r_asis_pos = _get_data_from_marker(data, labels, marker='r_asis')
+
+    # Calculate virtual pelvis marker
     pelvis_pos = ( l_asis_pos + l_psis_pos + r_asis_pos + r_psis_pos ) / 4
 
     # Get position data for auxiliary markers
-    start_1 = np.squeeze(data[:,:,np.argwhere(labels=='start_1')[:,0]], axis=-1)
-    start_2 = np.squeeze(data[:,:,np.argwhere(labels=='start_2')[:,0]], axis=-1)
-    end_1 = np.squeeze(data[:,:,np.argwhere(labels=='end_1')[:,0]], axis=-1)
-    end_2 = np.squeeze(data[:,:,np.argwhere(labels=='end_2')[:,0]], axis=-1)
+    start_1 = _get_data_from_marker(data, labels, marker='start_1')
+    start_2 = _get_data_from_marker(data, labels, marker='start_2')
+    end_1 = _get_data_from_marker(data, labels, marker='end_1')
+    end_2 = _get_data_from_marker(data, labels, marker='end_2')
     mid_start = ( start_1 + start_2 ) / 2
     mid_end = ( end_1 + end_2 ) / 2
 
@@ -364,6 +393,12 @@ def _get_start_end_index(data, labels):
     distances = np.sqrt(np.sum(((pelvis_pos - mid_end)**2), axis=1))
     ix_end = np.argmin(distances)
     del distances
+
+    # Swap start and end, if walking in other direction (or labels are swapped)
+    if ix_end < ix_start:
+        ix_start_ = ix_end
+        ix_end = ix_start
+        ix_start = ix_start_
     return ix_start, ix_end
 
 def _align_trajectories_with_walking_direction(data, labels):
@@ -385,10 +420,10 @@ def _align_trajectories_with_walking_direction(data, labels):
     n_time_steps, n_dimensions, n_markers = data.shape
 
     # Get the iliac spine markers
-    l_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_psis')[:,0]], axis=-1)
-    r_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_psis')[:,0]], axis=-1)
-    l_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_asis')[:,0]], axis=-1)
-    r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
+    l_psis_pos = _get_data_from_marker(data, labels, marker='l_psis')
+    r_psis_pos = _get_data_from_marker(data, labels, marker='r_psis')
+    l_asis_pos = _get_data_from_marker(data, labels, marker='l_asis')
+    r_asis_pos = _get_data_from_marker(data, labels, marker='r_asis')
     pelvis_pos = ( l_asis_pos + l_psis_pos + r_asis_pos + r_psis_pos ) / 4
 
     # Get the estimated start and end of the trial

@@ -1,8 +1,9 @@
 from math import dist
+import warnings
 import numpy as np
 from scipy.signal import find_peaks
 from scipy.spatial import distance
-from lib.preprocessing import _remove_drift_200Hz, _butter_lowpass
+from lib.preprocessing import _remove_drift_200Hz, _butter_lowpass, _get_data_from_marker
 
 def _extract_temporal_gait_params(left_ix_IC, left_ix_FC, right_ix_IC, right_ix_FC, fs):
     """Extracts temporal gait parameters based on the detected left and right initial and final contacts.
@@ -90,9 +91,17 @@ def _get_gait_events_Pijnappels(heel_pos, toe_pos, fs):
     mid_foot_pos = ( heel_pos + toe_pos ) / 2
 
     # Calculate the velocity signals
-    heel_vel = ( heel_pos[1:,:] - heel_pos[:-1,:] ) / (1./fs)
-    toe_vel = ( toe_pos[1:,:] - toe_pos[:-1,:] ) / (1./fs)
-    mid_foot_vel = ( mid_foot_pos[1:,:] - mid_foot_pos[:-1,:] ) / (1./fs)
+    heel_vel = np.zeros_like(heel_pos)
+    heel_vel[1:,:] = ( heel_pos[1:,:] - heel_pos[:-1,:] ) / (1/fs)
+    heel_vel[0,:] = heel_vel[1,:]
+    
+    toe_vel = np.zeros_like(toe_pos)
+    toe_vel[1:,:] = ( toe_pos[1:,:] - toe_pos[:-1,:] ) / (1./fs)
+    toe_vel[0,:] = toe_vel[1,:]
+
+    mid_foot_vel = np.zeros_like(mid_foot_pos)
+    mid_foot_vel[1:,:] = ( mid_foot_pos[1:,:] - mid_foot_pos[:-1,:] ) / (1./fs)
+    mid_foot_vel[0,:] = mid_foot_vel[1,:]
 
     # Detect peaks in the velocity signals
     #   Define thresholds
@@ -122,11 +131,13 @@ def _get_gait_events_Pijnappels(heel_pos, toe_pos, fs):
     for ix_pk in ix_max_vel_x:
 
         # Consider the negative peaks following the current (horizontal) peak
-        f = np.argwhere(np.logical_and(ix_min_toe_vel_z > ix_pk, ix_min_toe_vel_z < ix_pk+fs//4))[:,0]
+        f = np.argwhere(np.logical_and(ix_min_toe_vel_z > ix_pk, ix_min_toe_vel_z < ix_pk+fs//2))[:,0]
         if len(f) > 0:
 
             # First local minimum corresponds to initial contact
-            ix_IC.append(ix_min_toe_vel_z[f[0]])
+            thr = 0.20
+            if (mid_foot_vel[ix_min_toe_vel_z[f[0]],0] / mid_foot_vel[ix_pk,0]) < thr:
+                ix_IC.append(ix_min_toe_vel_z[f[0]])
         
         # Consider the positive peaks preceding the current (horizontal) peak
         f = np.argwhere(ix_max_heel_vel_z < ix_pk)[:,0]
@@ -134,7 +145,10 @@ def _get_gait_events_Pijnappels(heel_pos, toe_pos, fs):
 
             # Last local maximum corresponds to final contact
             ix_FC.append(ix_max_heel_vel_z[f[-1]])
-    return np.array(ix_IC), np.array(ix_FC)
+    
+    # Correct initial contacts (and final contacts)
+    ix_IC, ix_FC = np.array(ix_IC), np.array(ix_FC)
+    return ix_IC, ix_FC
 
 def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
     """Detect gait events from optical motion capture data according to O'Connor et al. (2007).
@@ -153,7 +167,9 @@ def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
     mid_foot_pos = ( heel_pos + toe_pos ) / 2
 
     # Calculate the velocity signal
-    mid_foot_vel = ( mid_foot_pos[1:,:] - mid_foot_pos[:-1,:] ) / (1./fs)
+    mid_foot_vel = np.zeros_like(mid_foot_pos)
+    mid_foot_vel[1:,:] = ( mid_foot_pos[1:,:] - mid_foot_pos[:-1,:] ) / (1./fs)
+    mid_foot_vel[0,:] = mid_foot_vel[1,:]
 
     # Detect peaks in the velocity signals
     #   Define thresholds
@@ -175,7 +191,7 @@ def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
     for ix_pk in ix_max_vel_x:
 
         # Consider the negative peaks following the current (horizontal) peak
-        f = np.argwhere(np.logical_and(ix_min_vel_z > ix_pk, ix_min_vel_z < ix_pk+fs//4))[:,0]
+        f = np.argwhere(np.logical_and(ix_min_vel_z > ix_pk, ix_min_vel_z < ix_pk+fs//2))[:,0]
         if len(f) > 0:
 
             # First local minimum corresponds to initial contact
@@ -187,7 +203,10 @@ def _get_gait_events_OConnor(heel_pos, toe_pos, fs):
 
             # Last local maximum corresponds to final contact
             ix_FC.append(ix_max_vel_z[f[-1]])
-    return np.array(ix_IC), np.array(ix_FC)
+    
+    # Correct initial contacts (and final contacts)
+    ix_IC, ix_FC = np.array(ix_IC), np.array(ix_FC)
+    return ix_IC, ix_FC
 
 def _get_gait_events_Zeni(heel_pos, toe_pos, pelvis_pos, fs):
     """Detect gait events from optical motion capture data according to Zeni Jr et al. (2008).
@@ -240,14 +259,16 @@ def _get_gait_events_from_OMC(data, fs, labels, method="OConnor"):
     """
 
     # Get position data for relevant markers
-    l_heel_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_heel')[:,0]], axis=-1)
-    r_heel_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_heel')[:,0]], axis=-1)
-    l_toe_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_toe')[:,0]], axis=-1)
-    r_toe_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_toe')[:,0]], axis=-1)
-    l_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_psis')[:,0]], axis=-1)
-    r_psis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_psis')[:,0]], axis=-1)
-    l_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='l_asis')[:,0]], axis=-1)
-    r_asis_pos = np.squeeze(data[:,:,np.argwhere(labels=='r_asis')[:,0]], axis=-1)
+    l_heel_pos = _get_data_from_marker(data, labels, marker='l_heel')
+    r_heel_pos = _get_data_from_marker(data, labels, marker='r_heel')
+    l_toe_pos = _get_data_from_marker(data, labels, marker='l_toe')
+    r_toe_pos = _get_data_from_marker(data, labels, marker='r_toe')
+    l_psis_pos = _get_data_from_marker(data, labels, marker='l_psis')
+    r_psis_pos = _get_data_from_marker(data, labels, marker='r_psis')
+    l_asis_pos = _get_data_from_marker(data, labels, marker='l_asis')
+    r_asis_pos = _get_data_from_marker(data, labels, marker='r_asis')
+    
+    # Calculate virtual pelvis marker
     pelvis_pos = ( l_psis_pos + r_psis_pos + l_asis_pos + r_asis_pos ) / 4
 
     # Switch methods  
@@ -382,7 +403,8 @@ def _get_gait_events_Salarian(gyro_ML, fs):
     ix_MS, _ = find_peaks(-filtered_gyro, height=thr, distance=fs//2)
 
     # Detect peaks corresponding to initial contacts
-    ix_pks, _ = find_peaks(gyro_ML)
+    thr_ang_vel_IC = 10.0
+    ix_pks, _ = find_peaks(gyro_ML, height=thr_ang_vel_IC)
     ix_IC = []
     for i in range(len(ix_MS)):
         # Find the nearest IC after midswing
@@ -401,9 +423,8 @@ def _get_gait_events_Salarian(gyro_ML, fs):
             ix_FC.append(ix_pks[f[-1]])
     return np.array(ix_MS), np.array(ix_IC), np.array(ix_FC)
 
-
-def _get_gait_evens_from_IMU(imu_data, label=""):
-    """Detect gait events from an inertial measurement unit (IMU) from the body position given bu the label.
+def _get_gait_events_from_IMU(imu_data, label=""):
+    """Detect gait events from an inertial measurement unit (IMU) from the body position given by the label.
 
     Parameters
     ----------
