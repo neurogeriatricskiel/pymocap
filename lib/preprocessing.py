@@ -3,6 +3,53 @@ from numpy.matlib import repmat
 import warnings
 from scipy.signal import filtfilt
 
+def _resample(data, fs_old, fs_new):
+    """Resample data array.
+    
+    Parameters
+    ----------
+    data : (N, D, K) numpy array
+        A numpy array with N time steps across D dimensions for K sources.
+    fs_old, fs_new : int, float
+        Sampling frequenqy (in Hz) before and after resampling, respectively.
+    
+    Returns
+    -------
+    data_out : (M, D, K) numpy array
+        A numpy array with M time steps across D dimensions for K sources.
+    """
+    from scipy.interpolate import interp1d
+
+    # 
+    try:
+        n_time_steps, n_channels, n_sensors = data.shape
+    except:
+        data = data.reshape(-1, 1)
+        n_time_steps, n_channels = data.shape
+        
+    # Original time steps
+    t_old = np.arange(n_time_steps)/fs_old
+
+    # Total number after time steps after resampling
+    M = int(t_old[-1]/(1/fs_new))+1
+    t_new = np.arange(M)/fs_new
+    
+    # Allocate memory for output variable
+    data_out = np.zeros((M, n_channels, n_sensors))
+
+    # For each sensor
+    for ix_sens in range(n_sensors):
+            
+        # For each dimensions
+        for ix_chan in range(n_channels):
+
+            # Get interpolation function
+            f = interp1d(t_old, data[:,ix_chan,ix_sens])
+
+            # Fit new data points to function
+            data_out[:,ix_chan,ix_sens] = f(t_new)
+    return data_out
+
 def _remove_drift_200Hz(data):
     """Remove drift by high-pass filtering the data.
     

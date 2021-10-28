@@ -7,7 +7,7 @@ mpl.rcParams['axes.spines.right'] = False
 mpl.rcParams['axes.spines.bottom'] = False
 import matplotlib.pyplot as plt
 from lib.utils import _load_file
-from lib.preprocessing import _predict_missing_markers, _butter_lowpass, _align_trajectories_with_walking_direction, _get_start_end_index, _get_data_from_marker
+from lib.preprocessing import _predict_missing_markers, _butter_lowpass, _align_trajectories_with_walking_direction, _get_start_end_index, _get_data_from_marker, _resample
 from lib.analysis import _get_gait_events_from_OMC, _get_gait_events_from_IMU, _extract_temporal_gait_params
 import os
 from scipy.signal import find_peaks
@@ -31,7 +31,7 @@ def main():
 
     # Loop over the participants
     l_IC_results, l_FC_results, r_IC_results, r_FC_results = [], [], [], []
-    for (ix_participant, participant_id) in enumerate(participant_ids[105:106]):
+    for (ix_participant, participant_id) in enumerate(participant_ids[-2:]):
         print(f"{ix_participant:>3d}: {participant_id}")
 
         # Get a list of optical motion capture files
@@ -89,7 +89,10 @@ def main():
                 imu_data = _load_file(os.path.join(PARENT_FOLDER, participant_id, "imu", imu_filename))
                 fs_imu = imu_data["fs"]
                 if fs_imu != fs_omc:
-                    print(f"Resampling IMU data to match that of OMC.")
+                    imu_data['acc'] = _resample(imu_data['acc'], fs_old=fs_imu, fs_new=fs_omc)
+                    imu_data['gyro'] = _resample(imu_data['gyro'], fs_old=fs_imu, fs_new=fs_omc)
+                    imu_data['magn'] = _resample(imu_data['magn'], fs_old=fs_imu, fs_new=fs_omc)
+                    fs_imu = fs_omc
                 
                 # 1. Detect gait event from ankle-worn IMU
                 l_ank_acc, l_ank_gyro, l_ix_MS_IMU, l_ix_IC_IMU, l_ix_FC_IMU = _get_gait_events_from_IMU(imu_data, label="left_ankle")
