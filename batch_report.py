@@ -27,12 +27,18 @@ def main():
     participant_ids = [folder_name for folder_name in os.listdir(PARENT_FOLDER) if folder_name.startswith("pp")]
 
     # Trial
-    trial_name = "walk_preferred"
+    trial_name = "walk_fast"
 
     # Loop over the participants
+    skip_ids = {'walk_preferred': [],\
+        'walk_slow': ['pp007', 'pp068', 'pp093', 'pp120', 'pp154', 'pp158', 'pp162', 'pp164'],\
+            'walk_fast': ['pp038', 'pp040', 'pp060', 'pp075', 'pp081', 'pp124', 'pp152', 'pp154', 'pp158', 'pp162', 'pp164']}
     l_IC_results, l_FC_results, r_IC_results, r_FC_results = [], [], [], []
-    for (ix_participant, participant_id) in enumerate(participant_ids[-2:]):
-        print(f"{ix_participant:>3d}: {participant_id}")
+    start_number = participant_ids.index(skip_ids[trial_name][-1])
+    for (ix_participant, participant_id) in enumerate(participant_ids[start_number:]):
+        print(f"{ix_participant+start_number:>3d}: {participant_id}")
+        if participant_id in skip_ids[trial_name]:
+            continue
 
         # Get a list of optical motion capture files
         omc_filenames = [file_name for file_name in os.listdir(os.path.join(PARENT_FOLDER, participant_id, "optical")) if file_name.endswith(".mat")]
