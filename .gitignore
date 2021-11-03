@@ -1,2 +1,4 @@
 .ipynb_checkpoints/
+.pymocap/__pycache__
 *.m
+*.pyc
