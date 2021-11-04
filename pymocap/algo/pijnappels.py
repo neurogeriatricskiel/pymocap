@@ -48,7 +48,7 @@ def pijnappels(heel_pos, toe_pos, fs, **kwargs):
     ix_pks_x = ix_pks_x[pk_proms[0] > 0.1*max(pk_proms[0])]
 
     # Detect local minima in the toe vertical velocity
-    ix_min_z_toe, _ = find_peaks(-toe_pos_filt[:,2])
+    ix_min_z_toe, _ = find_peaks(-toe_vel[:,2])
 
     # Detect local maxima in the heel vertical velocity
     ix_max_z_heel, _ = find_peaks(heel_vel[:,2])

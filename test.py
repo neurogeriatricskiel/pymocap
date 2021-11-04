@@ -1,4 +1,5 @@
 from pymocap.algo import predict_missing_markers
+from pymocap.algo.zeni import zeni
 from pymocap.utils import _load_file
 from pymocap import preprocessing
 from pymocap.algo import *
@@ -52,16 +53,26 @@ for trial_name in trial_names:
     # ------------------------------
     # Optical Motion Capture Data
     # ------------------------------
-    # Check if data is available for left and right heel and toe markers
-    if ("l_heel" not in omc_data["marker_location"]) or ("r_heel" not in omc_data["marker_location"]) or ("l_toe" not in omc_data["marker_location"]) or ("r_toe" not in omc_data["marker_location"]):
-        raise Exception('Data from either the left or right heel or toe marker is missing!')
-        continue
+    # Check if data is available for relevant markers
+    my_markers = ["l_heel", "r_heel", "l_toe", "r_toe", "l_psis", "r_psis"]
+    for marker in my_markers:
+        if (marker not in omc_data["marker_location"]):
+            print(f"Data from {marker:s} not available from {omc_file_name:s} of {participant_id:s}. Skip analysis.")
 
     # Indexes corresponding to left and right heel and toe markers
+    markers = ["l_heel", "r_heel", "l_toe", "r_toe", "l_psis", "r_psis"]
     ix_l_heel = np.argwhere(omc_data["marker_location"]=="l_heel")[:,0][0]
     ix_r_heel = np.argwhere(omc_data["marker_location"]=="r_heel")[:,0][0]
     ix_l_toe = np.argwhere(omc_data["marker_location"]=="l_toe")[:,0][0]
     ix_r_toe = np.argwhere(omc_data["marker_location"]=="r_toe")[:,0][0]
+    ix_l_psis = np.argwhere(omc_data["marker_location"]=="l_psis")[:,0][0]
+    ix_r_psis = np.argwhere(omc_data["marker_location"]=="r_psis")[:,0][0]
+    # ix_l_asis = np.argwhere(omc_data["marker_location"]=="l_asis")[:,0][0]
+    # ix_r_asis = np.argwhere(omc_data["marker_location"]=="r_asis")[:,0][0]
+    start_1 = np.nanmean(omc_data["pos"][:,:3,np.argwhere(omc_data["marker_location"]=="start_1")[:,0][0]], axis=0)
+    start_2 = np.nanmean(omc_data["pos"][:,:3,np.argwhere(omc_data["marker_location"]=="start_2")[:,0][0]], axis=0)
+    end_1 = np.nanmean(omc_data["pos"][:,:3,np.argwhere(omc_data["marker_location"]=="end_1")[:,0][0]], axis=0)
+    end_2 = np.nanmean(omc_data["pos"][:,:3,np.argwhere(omc_data["marker_location"]=="end_2")[:,0][0]], axis=0)
 
     # Reshape data
     pos = np.reshape(omc_data["pos"][:,:3,:], (omc_data["pos"].shape[0], (omc_data["pos"].shape[1]-1)*omc_data["pos"].shape[2]), order='F')
@@ -78,6 +89,9 @@ for trial_name in trial_names:
 
     ix_l_IC_Pijnappels, ix_l_FC_Pijnappels = pijnappels(filled_pos[:,ix_l_heel*3:ix_l_heel*3+3], filled_pos[:,ix_l_toe*3:ix_l_toe*3+3], omc_data['fs'])
     ix_r_IC_Pijnappels, ix_r_FC_Pijnappels = pijnappels(filled_pos[:,ix_r_heel*3:ix_r_heel*3+3], filled_pos[:,ix_r_toe*3:ix_r_toe*3+3], omc_data['fs'])
+
+    ix_l_IC_Zeni, ix_l_FC_Zeni = zeni(filled_pos[:,ix_l_heel*3:ix_l_heel*3+3], filled_pos[:,ix_l_toe*3:ix_l_toe*3+3], filled_pos[:,ix_l_psis*3:ix_l_psis*3+3], omc_data['fs'])
+    ix_r_IC_Zeni, ix_r_FC_Zeni = zeni(filled_pos[:,ix_r_heel*3:ix_r_heel*3+3], filled_pos[:,ix_r_toe*3:ix_r_toe*3+3], filled_pos[:,ix_r_psis*3:ix_r_psis*3+3], omc_data['fs'])
 
     # ------------------------------
     # Visualize
