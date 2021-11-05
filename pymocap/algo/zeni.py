@@ -17,6 +17,9 @@ def zeni(heel_pos, toe_pos, psis_pos, fs, **kwargs):
     from scipy.signal import find_peaks, peak_prominences
     from pymocap.preprocessing import _butter_lowpass_filter
 
+    # Get kwargs
+    visualize = kwargs.get("visualize", False)
+
     # Lowpass filter
     heel_pos_filt = _butter_lowpass_filter(heel_pos, fs, fc=7.)
     toe_pos_filt  = _butter_lowpass_filter(toe_pos, fs, fc=7.)
@@ -40,11 +43,12 @@ def zeni(heel_pos, toe_pos, psis_pos, fs, **kwargs):
     ix_IC, ix_FC = ix_max_x_heel, ix_min_x_toe
 
     # Visualize
-    # fig, ax = plt.subplots(1, 1, figsize=(21., 14.8))
-    # ax.plot(heel_pos_rel[:,0], ls='-', lw=1, c=(0, 0.5, 0))
-    # ax.plot(ix_max_x_heel, heel_pos_rel[ix_max_x_heel,0], 'o', mfc='none', mec=(0, 0.5, 0))
-    # ax.plot(toe_pos_rel[:,0], ls='-', lw=1, c=(0, 0.5, 0, 0.5))
-    # ax.plot(ix_min_x_toe, toe_pos_rel[ix_min_x_toe,0], 'o', mfc='none', mec=(0, 0.5, 0, 0.5))
-    # ax.set_xlim((0, heel_pos_rel.shape[0]))
-    # plt.show()
+    if visualize == True:
+        fig, ax = plt.subplots(1, 1, figsize=(21., 14.8))
+        ax.plot(heel_pos_rel[:,0], ls='-', lw=1, c=(0, 0.5, 0))
+        ax.plot(ix_max_x_heel, heel_pos_rel[ix_max_x_heel,0], 'o', mfc='none', mec=(0, 0.5, 0))
+        ax.plot(toe_pos_rel[:,0], ls='-', lw=1, c=(0, 0.5, 0, 0.5))
+        ax.plot(ix_min_x_toe, toe_pos_rel[ix_min_x_toe,0], 'o', mfc='none', mec=(0, 0.5, 0, 0.5))
+        ax.set_xlim((0, heel_pos_rel.shape[0]))
+        plt.show()
     return ix_IC, ix_FC

@@ -22,6 +22,9 @@ def oconnor(heel_pos, toe_pos, fs, **kwargs):
     from scipy.signal import find_peaks, peak_prominences
     from pymocap.preprocessing import _butter_lowpass_filter
 
+    # Get kwargs
+    visualize = kwargs.get("visualize", False)
+
     # Lowpass filter
     heel_pos_filt = _butter_lowpass_filter(heel_pos, fs, 7.)
     toe_pos_filt  = _butter_lowpass_filter(toe_pos, fs, 7.)
@@ -40,7 +43,7 @@ def oconnor(heel_pos, toe_pos, fs, **kwargs):
     ix_pks_x = ix_pks_x[pk_proms[0] > 0.1*max(pk_proms[0])]
 
     # Detect negative peaks in the foot center vertical velocity
-    ix_pks_z_neg, _ = find_peaks(-foot_center_vel[:,2])
+    ix_pks_z_neg, _ = find_peaks(-foot_center_vel[:,2], height=0)
     ix_pks_z_pos, _ = find_peaks(foot_center_vel[:,2])
 
     ix_IC, ix_FC = [], []
@@ -53,19 +56,20 @@ def oconnor(heel_pos, toe_pos, fs, **kwargs):
             ix_FC.append(ix_pks_z_pos[g[-1]])
     
     # Visualize
-    # fig, ax = plt.subplots(3, 1)
-    # ax[0].plot(heel_pos[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.4))
-    # ax[0].plot(toe_pos[:,2], ls='-.', lw=1, c=(0, 0.5, 0, 0.2))
-    # ax[0].plot(foot_center_pos[:,2], ls='-', lw=1, c=(0, 0.5, 0))
-    # ax[0].set_xlim((0, foot_center_pos.shape[0]))
+    if visualize == True:
+        fig, ax = plt.subplots(3, 1)
+        ax[0].plot(heel_pos[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.4))
+        ax[0].plot(toe_pos[:,2], ls='-.', lw=1, c=(0, 0.5, 0, 0.2))
+        ax[0].plot(foot_center_pos[:,2], ls='-', lw=1, c=(0, 0.5, 0))
+        ax[0].set_xlim((0, foot_center_pos.shape[0]))
 
-    # ax[1].plot(foot_center_vel[:,2], ls='-', lw=1, c=(0, 0.5, 0))
-    # ax[1].plot(ix_IC, foot_center_vel[ix_IC,2], 'o', mfc='none', mec=(0, 0.5, 0), ms=8)
-    # ax[1].plot(ix_FC, foot_center_vel[ix_FC,2], 's', mfc='none', mec=(0, 0.5, 0), ms=8)
-    # ax[1].set_xlim((0, foot_center_vel.shape[0]))
-    
-    # ax[2].plot(foot_center_vel[:,0], ls='-', lw=1, c=(0, 0.5, 0))
-    # ax[2].plot(ix_pks_x, foot_center_vel[ix_pks_x,0], '^', mfc='none', mec=(0, 0.5, 0), ms=4)
-    # ax[2].set_xlim((0, foot_center_vel.shape[0]))
-    # plt.show()
+        ax[1].plot(foot_center_vel[:,2], ls='-', lw=1, c=(0, 0.5, 0))
+        ax[1].plot(ix_IC, foot_center_vel[ix_IC,2], 'o', mfc='none', mec=(0, 0.5, 0), ms=8)
+        ax[1].plot(ix_FC, foot_center_vel[ix_FC,2], 's', mfc='none', mec=(0, 0.5, 0), ms=8)
+        ax[1].set_xlim((0, foot_center_vel.shape[0]))
+        
+        ax[2].plot(foot_center_vel[:,0], ls='-', lw=1, c=(0, 0.5, 0))
+        ax[2].plot(ix_pks_x, foot_center_vel[ix_pks_x,0], '^', mfc='none', mec=(0, 0.5, 0), ms=4)
+        ax[2].set_xlim((0, foot_center_vel.shape[0]))
+        plt.show()
     return np.array(ix_IC), np.array(ix_FC)
