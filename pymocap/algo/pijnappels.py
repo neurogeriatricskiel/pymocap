@@ -11,6 +11,9 @@ def pijnappels(heel_pos, toe_pos, fs, **kwargs):
         for the heel and toe marker, respectively.
     fs : int, float
         The sampling frequency (in Hz).
+    visualize : bool
+        Boolean that indicates whether signals should be plotted.
+        Defaults to False.
 
     Returns
     -------
@@ -21,6 +24,9 @@ def pijnappels(heel_pos, toe_pos, fs, **kwargs):
     import matplotlib.pyplot as plt
     from scipy.signal import find_peaks, peak_prominences
     from pymocap.preprocessing import _butter_lowpass_filter
+
+    # Get kwargs
+    visualize = kwargs.get("visualize", False)
 
     # Lowpass filter
     heel_pos_filt = _butter_lowpass_filter(heel_pos, fs, 7.)
@@ -48,7 +54,8 @@ def pijnappels(heel_pos, toe_pos, fs, **kwargs):
     ix_pks_x = ix_pks_x[pk_proms[0] > 0.1*max(pk_proms[0])]
 
     # Detect local minima in the toe vertical velocity
-    ix_min_z_toe, _ = find_peaks(-toe_vel[:,2])
+    thr = 0.1 * np.max(-toe_vel[:,2])  # local threshold
+    ix_min_z_toe, _ = find_peaks(-toe_vel[:,2], height=thr)
 
     # Detect local maxima in the heel vertical velocity
     ix_max_z_heel, _ = find_peaks(heel_vel[:,2])
@@ -63,18 +70,25 @@ def pijnappels(heel_pos, toe_pos, fs, **kwargs):
             ix_FC.append(ix_max_z_heel[g[-1]])
     
     # Visualize
-    # fig, ax = plt.subplots(3, 1)
-    # ax[0].plot(heel_pos_filt[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.4))
-    # ax[0].plot(toe_pos_filt[:,2], ls='-.', lw=1, c=(0, 0.5, 0, 0.2))
-    # ax[0].set_xlim((0, toe_pos_filt.shape[0]))
+    if visualize == True:
+        fig, axs = plt.subplots(3, 1)
+        axs[0].plot(heel_pos_filt[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.4))
+        axs[0].plot(toe_pos_filt[:,2], ls='-.', lw=1, c=(0, 0.5, 0, 0.2))
+        axs[0].plot(ix_IC, heel_pos_filt[ix_IC,2], 'o', mfc='none', mec=(0, 0.5, 0), ms=8)
+        axs[0].set_xlim((0, toe_pos_filt.shape[0]))
 
-    # ax[1].plot(heel_vel[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.4))
-    # ax[1].plot(toe_vel[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.2))
-    # ax[1].plot(ix_IC, toe_vel[ix_IC,2], 'o', mfc='none', mec=(0, 0.5, 0), ms=8)
-    # ax[1].plot(ix_FC, heel_vel[ix_FC,2], 's', mfc='none', mec=(0, 0.5, 0), ms=8)
-    # ax[1].set_xlim((0, toe_vel.shape[0]))
+        axs[1].plot(heel_vel[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.4))
+        axs[1].plot(toe_vel[:,2], ls='-', lw=1, c=(0, 0.5, 0, 0.2))
+        axs[1].plot(ix_IC, toe_vel[ix_IC,2], 'o', mfc='none', mec=(0, 0.5, 0), ms=8)
+        axs[1].plot(ix_FC, heel_vel[ix_FC,2], 's', mfc='none', mec=(0, 0.5, 0), ms=8)
+        axs[1].set_xlim((0, toe_vel.shape[0]))
 
-    # ax[2].plot(foot_center_vel[:,0], ls='-', lw=1, c=(0, 0.5, 0))
-    # ax[2].plot(ix_pks_x, foot_center_vel[ix_pks_x,0], '*', c=(0, 0.5, 0))
-    # plt.show()
+        axs[2].plot(foot_center_vel[:,0], ls='-', lw=1, c=(0, 0.5, 0))
+        axs[2].plot(ix_pks_x, foot_center_vel[ix_pks_x,0], '*', c=(0, 0.5, 0))
+        for i in range(len(ix_pks_x)):
+            axs[0].plot([ix_pks_x[i], ix_pks_x[i]], [np.min(toe_pos_filt[:,2]), np.max(heel_pos_filt[:,2])], ls='-', lw=1, c=(1, 0.5, 0))
+            axs[1].plot([ix_pks_x[i], ix_pks_x[i]], [np.min(heel_vel[:,2]), np.max(heel_vel[:,2])], ls='-', lw=1, c=(1, 0.5, 0))
+            axs[2].plot([ix_pks_x[i], ix_pks_x[i]], [np.min(foot_center_vel[:,0]), np.max(foot_center_vel[:,0])], ls='-', lw=1, c=(1, 0.5, 0))
+        axs[2].set_xlim((0, foot_center_vel.shape[0]))
+        plt.show()
     return np.array(ix_IC), np.array(ix_FC)

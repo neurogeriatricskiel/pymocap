@@ -29,7 +29,8 @@ def salarian(x, fs, **kwargs):
     from scipy.signal import find_peaks
     from pymocap.preprocessing import _remove_drift, _butter_lowpass_filter
 
-    # Parse optional args
+    # Get kwargs
+    visualize = kwargs.get("visualize", False)
     thr_MS = kwargs.get("thr_MS", 50.0)
     thr_IC = kwargs.get("thr_IC", 10.0)
     thr_FC = kwargs.get("thr_FC", 20.0)
@@ -51,6 +52,8 @@ def salarian(x, fs, **kwargs):
         f = np.argwhere(np.logical_and(ix_pks_IC > ix_MS[i], ix_pks_IC<ix_MS[i]+(fs+fs//2)))[:,0]
         if len(f)>0:
             ix_IC.append(ix_pks_IC[f[0]])
+    
+    # Detect peaks associated with final contact
     ix_pks_FC, _ = find_peaks(-x_filt, height=thr_FC)
     ix_FC = []
     for i in range(len(ix_MS)):
